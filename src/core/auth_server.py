@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import json
+import re
 import threading
 import time
 from collections.abc import Callable
@@ -9,15 +10,51 @@ from dataclasses import dataclass, field
 from enum import Enum
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from pathlib import Path
+from string import Template
+from urllib.parse import parse_qs, unquote, urlparse
 
-from ..api.client import SouthPlusClient, SouthPlusLoginAttempt, SouthPlusLoginError
-from ..api.models import LoginRequest, LoginResult
+from ..southplus.api import (
+    LoginRequest,
+    LoginResult,
+    SouthPlusClient,
+    SouthPlusLoginAttempt,
+    SouthPlusLoginError,
+)
 from ..utils import expires_at_after, generate_token
 from .datamodels import AuthServerConfig, CredentialSession
 from .logger import plugin_logger
 
 LoginSuccessCallback = Callable[[CredentialSession, LoginRequest, LoginResult], None]
+
+# 模板与静态资源根目录（项目根 / templates、项目根 / assets）。
+_TEMPLATE_DIR = Path(__file__).resolve().parents[2] / "templates"
+_ASSETS_DIR = Path(__file__).resolve().parents[2] / "assets"
+_TEMPLATE_CACHE: dict[str, Template] = {}
+_ASSET_NAME_OK = re.compile(r"^[A-Za-z0-9._-]+$")
+
+# 静态资源后缀 → MIME 类型映射。
+_ASSET_MIME = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".svg": "image/svg+xml",
+}
+
+
+def _render(template_name: str, **mapping: str) -> str:
+    """从 templates/ 读取模板，按 string.Template 语法替换占位符。模板首次加载后缓存。"""
+    template = _TEMPLATE_CACHE.get(template_name)
+    if template is None:
+        path = _TEMPLATE_DIR / template_name
+        template = Template(path.read_text(encoding="utf-8"))
+        _TEMPLATE_CACHE[template_name] = template
+    return template.substitute(**mapping)
+
+
+def _asset_mime(filename: str) -> str:
+    suffix = Path(filename).suffix.lower()
+    return _ASSET_MIME.get(suffix, "application/octet-stream")
 
 
 class LoginState(str, Enum):
@@ -208,6 +245,24 @@ class CredentialFormServer:
                 self._close_entry(entry)
         return True, "登录成功，Cookie 已保存。可以关闭此页面。"
 
+    def handle_asset(self, filename: str) -> tuple[bytes, str] | None:
+        """读取 assets/ 下的静态文件，拒绝路径穿越。"""
+        # 防御路径穿越：解码后再二次校验。
+        try:
+            decoded = unquote(filename)
+        except Exception:  # noqa: BLE001
+            return None
+        if not decoded or not _ASSET_NAME_OK.match(decoded):
+            return None
+        target = (_ASSETS_DIR / decoded).resolve()
+        try:
+            target.relative_to(_ASSETS_DIR.resolve())
+        except ValueError:
+            return None
+        if not target.is_file():
+            return None
+        return target.read_bytes(), _asset_mime(decoded)
+
     def _make_handler(self) -> type[BaseHTTPRequestHandler]:
         outer = self
 
@@ -217,18 +272,20 @@ class CredentialFormServer:
                 return
 
             def do_GET(self) -> None:
-                kind, token = _route(self.path)
+                kind, value = _route(self.path)
                 if kind == "login":
-                    entry = outer._peek_entry(token)
+                    entry = outer._peek_entry(value)
                     if not entry:
-                        self._send_html(HTTPStatus.GONE, _expired_page())
+                        self._send_html(HTTPStatus.GONE, _render("expired.html"))
                         return
-                    seconds_left = max(0, int(entry.session.expires_at - time.time()))
-                    self._send_html(HTTPStatus.OK, _form_page(token, seconds_left))
+                    self._send_html(
+                        HTTPStatus.OK,
+                        _render("login.html", token=html.escape(value, quote=True)),
+                    )
                     return
                 if kind == "captcha":
                     try:
-                        payload = outer.handle_captcha(token)
+                        payload = outer.handle_captcha(value)
                     except SouthPlusLoginError as exc:
                         self._send_json(
                             HTTPStatus.BAD_GATEWAY, {"ok": False, "message": str(exc)}
@@ -249,12 +306,18 @@ class CredentialFormServer:
                     body, content_type = payload
                     self._send_bytes(HTTPStatus.OK, content_type, body)
                     return
-                self._send_html(
-                    HTTPStatus.NOT_FOUND, _message_page("请求的路径不存在。")
-                )
+                if kind == "asset":
+                    asset = outer.handle_asset(value)
+                    if not asset:
+                        self._send_html(HTTPStatus.NOT_FOUND, _render("404.html"))
+                        return
+                    body, content_type = asset
+                    self._send_bytes(HTTPStatus.OK, content_type, body)
+                    return
+                self._send_html(HTTPStatus.NOT_FOUND, _render("404.html"))
 
             def do_POST(self) -> None:
-                kind, token = _route(self.path)
+                kind, value = _route(self.path)
                 body = self._read_body()
                 if kind == "login":
                     fields = _parse_fields(self.headers.get("Content-Type", ""), body)
@@ -262,7 +325,7 @@ class CredentialFormServer:
                     password = fields.get("password", "")
                     captcha = fields.get("captcha", "")
                     ok, message = outer.handle_submit(
-                        token, username, password, captcha
+                        value, username, password, captcha
                     )
                     self._send_json(
                         HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST,
@@ -270,7 +333,7 @@ class CredentialFormServer:
                     )
                     return
                 if kind == "cancel":
-                    cancelled = outer.cancel_session(token)
+                    cancelled = outer.cancel_session(value)
                     if cancelled is None:
                         self._send_json(
                             HTTPStatus.GONE,
@@ -281,9 +344,7 @@ class CredentialFormServer:
                         HTTPStatus.OK, {"ok": True, "message": "已取消登录。"}
                     )
                     return
-                self._send_html(
-                    HTTPStatus.NOT_FOUND, _message_page("请求的路径不存在。")
-                )
+                self._send_html(HTTPStatus.NOT_FOUND, _render("404.html"))
 
             def _read_body(self) -> bytes:
                 try:
@@ -322,8 +383,11 @@ class CredentialFormServer:
 def _route(path: str) -> tuple[str, str]:
     parsed = urlparse(path)
     parts = [part for part in parsed.path.split("/") if part]
-    if len(parts) == 2 and parts[0] in {"login", "captcha", "cancel"}:
-        return parts[0], parts[1]
+    if len(parts) == 2:
+        if parts[0] in {"login", "captcha", "cancel"}:
+            return parts[0], parts[1]
+        if parts[0] == "assets":
+            return "asset", parts[1]
     return "", ""
 
 
@@ -340,143 +404,3 @@ def _parse_fields(content_type: str, body: bytes) -> dict[str, str]:
         return {str(k): str(v) for k, v in data.items()}
     form = parse_qs(raw)
     return {key: (values[0] if values else "").strip() for key, values in form.items()}
-
-
-def _form_page(token: str, seconds_left: int) -> str:
-    safe_token = html.escape(token, quote=True)
-    return f"""<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>South Plus 登录</title>
-  <style>
-    body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 2rem; color: #1f2937; }}
-    main {{ max-width: 460px; }}
-    form {{ display: grid; gap: 14px; margin-top: 12px; }}
-    label {{ display: grid; gap: 6px; font-weight: 600; }}
-    input, button {{ font: inherit; padding: 10px; border-radius: 6px; border: 1px solid #d1d5db; }}
-    button {{ cursor: pointer; }}
-    button.primary {{ background: #2563eb; color: white; border-color: #2563eb; }}
-    button.secondary {{ background: white; color: #374151; }}
-    .captcha {{ display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: end; }}
-    .captcha img {{ height: 60px; border: 1px solid #d1d5db; border-radius: 6px; background: #f9fafb; }}
-    .hint {{ color: #4b5563; line-height: 1.6; }}
-    .status {{ margin-top: 14px; padding: 12px; border-radius: 6px; display: none; }}
-    .status.ok {{ background: #ecfdf5; color: #065f46; display: block; }}
-    .status.err {{ background: #fef2f2; color: #991b1b; display: block; }}
-    .actions {{ display: flex; gap: 10px; }}
-  </style>
-</head>
-<body>
-  <main>
-    <h1>South Plus 登录</h1>
-    <p class="hint">链接一次性有效，提交后立即失效。密码只用于本次刷新 Cookie，不会保存。</p>
-    <p class="hint">剩余有效期约 {max(seconds_left, 0)} 秒。</p>
-    <form id="login-form" autocomplete="off">
-      <label>账号<input name="username" required></label>
-      <label>密码<input name="password" type="password" required></label>
-      <div>
-        <div style="font-weight:600; margin-bottom:6px;">认证码</div>
-        <div class="captcha">
-          <input name="captcha" required>
-          <img id="captcha-img" alt="captcha" src="/captcha/{safe_token}">
-        </div>
-        <p class="hint" style="margin:6px 0 0">点验证码图片可刷新；图片由插件代理拉取。</p>
-      </div>
-      <div class="actions">
-        <button class="primary" type="submit" id="submit-btn">提交</button>
-        <button class="secondary" type="button" id="cancel-btn">取消</button>
-      </div>
-      <div id="status" class="status"></div>
-    </form>
-  </main>
-  <script>
-    (function() {{
-      const token = "{safe_token}";
-      const form = document.getElementById("login-form");
-      const status = document.getElementById("status");
-      const img = document.getElementById("captcha-img");
-      const submitBtn = document.getElementById("submit-btn");
-      const cancelBtn = document.getElementById("cancel-btn");
-
-      function setStatus(text, ok) {{
-        status.textContent = text;
-        status.className = "status " + (ok ? "ok" : "err");
-      }}
-
-      function refreshCaptcha() {{
-        img.src = "/captcha/" + encodeURIComponent(token) + "?_=" + Date.now();
-      }}
-
-      img.addEventListener("click", refreshCaptcha);
-
-      form.addEventListener("submit", async (event) => {{
-        event.preventDefault();
-        submitBtn.disabled = true;
-        setStatus("提交中…", true);
-        const data = new FormData(form);
-        try {{
-          const response = await fetch("/login/" + encodeURIComponent(token), {{
-            method: "POST",
-            headers: {{ "Content-Type": "application/json" }},
-            body: JSON.stringify({{
-              username: data.get("username") || "",
-              password: data.get("password") || "",
-              captcha: data.get("captcha") || "",
-            }}),
-          }});
-          const payload = await response.json();
-          setStatus(payload.message || "", payload.ok);
-          if (payload.ok) {{
-            form.reset();
-            submitBtn.disabled = true;
-            cancelBtn.disabled = true;
-          }} else {{
-            submitBtn.disabled = false;
-            refreshCaptcha();
-          }}
-        }} catch (err) {{
-          submitBtn.disabled = false;
-          setStatus("网络异常：" + err.message, false);
-        }}
-      }});
-
-      cancelBtn.addEventListener("click", async () => {{
-        cancelBtn.disabled = true;
-        try {{
-          const response = await fetch("/cancel/" + encodeURIComponent(token), {{ method: "POST" }});
-          const payload = await response.json();
-          setStatus(payload.message || "已取消登录。", payload.ok);
-          submitBtn.disabled = true;
-        }} catch (err) {{
-          cancelBtn.disabled = false;
-          setStatus("网络异常：" + err.message, false);
-        }}
-      }});
-    }})();
-  </script>
-</body>
-</html>"""
-
-
-def _expired_page() -> str:
-    return _message_page("链接不存在或已过期。请回到聊天窗口重新发起 /splogin。")
-
-
-def _message_page(message: str) -> str:
-    safe_message = html.escape(message)
-    return f"""<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>South Plus 登录结果</title>
-  <style>
-    body {{ font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 2rem; color: #1f2937; }}
-  </style>
-</head>
-<body>
-  <p>{safe_message}</p>
-</body>
-</html>"""

@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from ..api.models import SouthPlusEndpoints, build_endpoints
+from ..southplus.api import SouthPlusEndpoints, build_endpoints
 from ..shared.constants import PLUGIN_NAME
 from .datamodels import AuthServerConfig, PluginConfigSnapshot
 

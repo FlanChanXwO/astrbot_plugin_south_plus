@@ -5,9 +5,10 @@ South Plus 多用户凭证与自动任务管理插件。
 ## 当前能力
 
 - `/splogin` 生成一次性临时登录链接（默认有效 10 分钟）。
-- 用户在临时网页表单里填写账号、密码、人工验证码；插件后端代理拉取站点验证码图片。
+- 用户在临时网页表单里填写账号、密码、人工验证码；插件后端代理拉取站点验证码图片。登录页带南+ logo，整体配色贴近原站。
 - 登录成功后只保存匹配域的 Cookie，并按配置加密写入 SQLite；账号密码不落库、不打日志。
-- 链接超时、提交失败、用户取消都会有明确的页面提示和聊天回执。
+- 链接超时、提交失败、用户取消都会有明确的页面提示和聊天回执；未知路径返回 404。
+- `/spprofile` 抓取 `https://bbs.south-plus.org/profile.php` 并用 Pillow 渲染资料卡片图（用户名 / UID / 个签 / 精华 / 发帖 / HP / 魄 / SP币 / LP / 头衔 / 在线时间 / 注册时间 / 最后登录 + 头像）。
 - `/spbindcookie <cookie>` 支持管理员直接保存 Cookie。
 - `/spstatus` 查看当前用户绑定状态。
 - `/spunbind` 删除当前用户凭证。
@@ -31,10 +32,12 @@ astrbot run -r -p 6196
 ## 插件结构
 
 - `main.py`：AstrBot 命令、Web API 注册与生命周期协调。
-- `src/api/`：**对 South Plus 站点逆向得到的接口、数据模型与常量**（URL、表单字段、cookie 命名、成功/失败判定）。站点改版时只改这一层。
-- `src/core/`：与站点解耦的框架代码（登录表单 server、SQLite data source、通用 datamodels、配置、日志）。
+- `src/southplus/`：**对 South Plus 站点逆向得到的接口、数据模型与常量**（URL、表单字段、cookie 命名、成功/失败判定、profile 抓取/解析）。`src/southplus/api/` 是对外接口层，`src/core/` 与 `main.py` 只通过它引用本包；实现模块（`client.py / models.py / constants.py / profile_client.py`）禁止被 core 直接 import。
+- `src/core/`：与站点解耦的框架代码（登录表单 server、SQLite data source、通用 datamodels、配置、日志、Pillow 资料卡片渲染）。
 - `src/shared/`：项目级共享常量（`PLUGIN_NAME`、日志前缀等非抓包常量）。
 - `src/utils/`：无状态工具子包（`crypto / text / timeutil / url`），通过 `from src.utils import ...` 统一引用。
+- `templates/`：登录 / 过期 / 通用消息 / 404 页面 HTML 模板（`string.Template` 渲染）。
+- `assets/`：静态资源（南+ logo 等），通过 `/assets/<filename>` 路由对外提供。
 - `pages/credentials/`：Dashboard 凭证管理页面。
 - `docs/`：维护、开发、安全说明，以及 `docs/southplus-capture.md`——South Plus 抓包流程与最近一次抓包结果（含 Capture 日期约束）。
 

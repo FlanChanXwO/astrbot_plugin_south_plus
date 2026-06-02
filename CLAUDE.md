@@ -13,10 +13,14 @@ This is an AstrBot plugin for South Plus credential and task automation.
 ## Package layout
 
 - `main.py` — AstrBot entry point only.
-- `src/api/` — **South Plus reverse-engineering artifacts** (constants, models, HTTP client). Touch this and you must touch `docs/southplus-capture.md` + its Capture date.
-- `src/core/` — framework-only code with no knowledge of South Plus (auth server, SQLite store, datamodels, config, logger).
+- `src/southplus/` — **South Plus reverse-engineering artifacts** (constants, models, HTTP clients, profile parser).
+  - `src/southplus/api/` is the **only** layer `src/core/` and `main.py` may import from. The package root `__init__.py` is intentionally empty of re-exports.
+  - Touching any file under `src/southplus/` requires updating `docs/southplus-capture.md` and its Capture date.
+- `src/core/` — framework-only code with no knowledge of South Plus (auth server, SQLite store, datamodels, config, logger, **user_card_render** for the Pillow profile card).
 - `src/shared/` — non-reverse-engineering shared constants (`PLUGIN_NAME`, log prefix).
 - `src/utils/` — stateless utility subpackage (`crypto / text / timeutil / url`). Always import via `from src.utils import ...`.
+- `templates/` — HTML templates rendered by `auth_server.py` (`login.html` / `expired.html` / `message.html` / `404.html`). Use `string.Template` syntax; no Jinja.
+- `assets/` — static binary assets served by the auth server at `/assets/<filename>` (currently `logo.png`).
 
 ## Boundaries
 

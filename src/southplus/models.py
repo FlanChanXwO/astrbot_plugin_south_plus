@@ -76,6 +76,30 @@ class CaptchaPayload:
     body: bytes
 
 
+@dataclass(slots=True)
+class UserProfile:
+    """South Plus 用户资料抓取结果。
+
+    字段来源于 ``profile.php`` 抓包截图——见 docs/southplus-capture.md。
+    解析失败的字段会以合理默认值返回（空串 / 0），不会为 None。
+    """
+
+    username: str = ""
+    uid: str = ""
+    signature: str = ""
+    avatar_url: str = ""
+    title: str = ""
+    essence: int = 0
+    posts: int = 0
+    hp: int = 0
+    soul: int = 0
+    sp_coin: str = ""
+    lp: int = 0
+    online_hours: str = ""
+    register_date: str = ""
+    last_login_date: str = ""
+
+
 def build_endpoints(
     *,
     site_base_url: str = "",

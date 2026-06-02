@@ -25,10 +25,12 @@ def test_endpoints_are_hardcoded_from_api_constants(tmp_path: Path) -> None:
 
 
 def test_user_agent_default_falls_back_to_api_constants(tmp_path: Path) -> None:
-    from src.api.constants import DEFAULT_USER_AGENT
+    from src.southplus.api import build_endpoints
 
     manager = _manager(tmp_path=tmp_path)
-    assert manager.snapshot().endpoints.user_agent == DEFAULT_USER_AGENT
+    # build_endpoints() with no user_agent argument should equal config manager's default.
+    assert manager.snapshot().endpoints.user_agent == build_endpoints().user_agent
+    assert manager.snapshot().endpoints.user_agent  # non-empty
 
 
 def test_user_agent_can_be_overridden(tmp_path: Path) -> None:

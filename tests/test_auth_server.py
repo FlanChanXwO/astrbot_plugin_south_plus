@@ -8,8 +8,12 @@ import urllib.request
 
 import pytest
 
-from src.api.client import SouthPlusClient
-from src.api.models import LoginRequest, LoginResult, SouthPlusEndpoints
+from src.southplus.api import (
+    LoginRequest,
+    LoginResult,
+    SouthPlusClient,
+    SouthPlusEndpoints,
+)
 from src.core.auth_server import CredentialFormServer
 from src.core.datamodels import AuthServerConfig, CredentialSession
 from tests.conftest import MockSouthPlusState
@@ -259,3 +263,56 @@ def test_concurrent_submits_do_not_double_login(
     finally:
         server.shutdown()
     assert len(successes) == 1
+
+
+def test_unknown_path_returns_404(mock_southplus: MockSouthPlusState) -> None:
+    server = _make_server(mock_southplus)
+    try:
+        server.ensure_started()
+        url = f"http://{server.config.listen_host}:{server.actual_port}/garbage"
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            urllib.request.urlopen(url)
+        assert exc.value.code == 404
+        body = exc.value.read().decode("utf-8")
+        assert "页面不存在" in body
+    finally:
+        server.shutdown()
+
+
+def test_assets_logo_served(mock_southplus: MockSouthPlusState) -> None:
+    server = _make_server(mock_southplus)
+    try:
+        server.ensure_started()
+        url = f"http://{server.config.listen_host}:{server.actual_port}/assets/logo.png"
+        with urllib.request.urlopen(url) as response:
+            assert response.status == 200
+            assert response.headers.get("Content-Type", "") == "image/png"
+            body = response.read()
+            assert body.startswith(b"\x89PNG")
+    finally:
+        server.shutdown()
+
+
+def test_assets_path_traversal_rejected(mock_southplus: MockSouthPlusState) -> None:
+    server = _make_server(mock_southplus)
+    try:
+        server.ensure_started()
+        # 形式 1: 编码过的斜杠 ..%2F..%2Fmain.py（路由仍把它当一个 segment）。
+        url1 = f"http://{server.config.listen_host}:{server.actual_port}/assets/..%2F..%2Fmain.py"
+        with pytest.raises(urllib.error.HTTPError) as exc1:
+            urllib.request.urlopen(url1)
+        assert exc1.value.code == 404
+        body1 = exc1.value.read().decode("utf-8")
+        assert "from __future__" not in body1
+
+        # 形式 2: 字面的 ../main.py（路由会拆成三段，落到默认 404）。
+        url2 = (
+            f"http://{server.config.listen_host}:{server.actual_port}/assets/../main.py"
+        )
+        with pytest.raises(urllib.error.HTTPError) as exc2:
+            urllib.request.urlopen(url2)
+        assert exc2.value.code == 404
+        body2 = exc2.value.read().decode("utf-8")
+        assert "from __future__" not in body2
+    finally:
+        server.shutdown()

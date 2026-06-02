@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>South Plus 登录</title>
+  <style>
+    :root {
+      --sp-blue: #4a90e2;
+      --sp-blue-dark: #2f6fbf;
+      --sp-blue-soft: #6699cc;
+      --sp-blue-light: #e8f1fb;
+      --sp-text: #1f2937;
+      --sp-muted: #5b6b7c;
+      --sp-border: #cfd8e3;
+      --sp-bg: #ffffff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      margin: 0;
+      padding: 2rem 1rem;
+      color: var(--sp-text);
+      background: linear-gradient(180deg, var(--sp-blue-light) 0%, #ffffff 60%);
+      min-height: 100vh;
+    }
+    main {
+      max-width: 480px;
+      margin: 0 auto;
+      background: var(--sp-bg);
+      border: 1px solid var(--sp-border);
+      border-radius: 14px;
+      padding: 24px 28px 28px;
+      box-shadow: 0 6px 20px rgba(74, 144, 226, 0.12);
+    }
+    .brand {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 18px;
+    }
+    .brand img {
+      max-width: 240px;
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+    h1 {
+      font-size: 1.25rem;
+      margin: 4px 0 0;
+      color: var(--sp-blue-dark);
+      text-align: center;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+    }
+    form { display: grid; gap: 14px; margin-top: 8px; }
+    label { display: grid; gap: 6px; font-weight: 600; color: var(--sp-text); font-size: 0.95rem; }
+    input, button {
+      font: inherit;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--sp-border);
+      background: #fff;
+      color: var(--sp-text);
+      transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+    }
+    input:focus {
+      outline: none;
+      border-color: var(--sp-blue);
+      box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.18);
+    }
+    button { cursor: pointer; }
+    button.primary {
+      background: var(--sp-blue);
+      color: #fff;
+      border-color: var(--sp-blue);
+      font-weight: 600;
+    }
+    button.primary:hover:not(:disabled) {
+      background: var(--sp-blue-dark);
+      border-color: var(--sp-blue-dark);
+    }
+    button.primary:disabled { opacity: 0.6; cursor: not-allowed; }
+    button.secondary {
+      background: #fff;
+      color: var(--sp-blue-dark);
+      border-color: var(--sp-blue-soft);
+    }
+    button.secondary:hover:not(:disabled) { background: var(--sp-blue-light); }
+    button.secondary:disabled { opacity: 0.6; cursor: not-allowed; }
+    .captcha {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      align-items: end;
+    }
+    .captcha img {
+      height: 60px;
+      border: 1px solid var(--sp-border);
+      border-radius: 8px;
+      background: #f5f9ff;
+      cursor: pointer;
+    }
+    .hint { color: var(--sp-muted); line-height: 1.6; font-size: 0.9rem; margin: 0; }
+    .status {
+      margin-top: 4px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      display: none;
+      font-size: 0.9rem;
+    }
+    .status.ok { background: #ecfdf5; color: #065f46; display: block; }
+    .status.err { background: #fef2f2; color: #991b1b; display: block; }
+    .actions { display: flex; gap: 10px; }
+    .actions button { flex: 1; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="brand">
+      <img src="/assets/logo.png" alt="South Plus">
+      <h1>South Plus 登录</h1>
+    </div>
+    <p class="hint">链接一次性有效，提交后立即失效。密码只用于本次刷新 Cookie，不会保存。</p>
+    <form id="login-form" autocomplete="off">
+      <label>账号<input name="username" required></label>
+      <label>密码<input name="password" type="password" required></label>
+      <div>
+        <div style="font-weight:600; margin-bottom:6px;">认证码</div>
+        <div class="captcha">
+          <input name="captcha" required>
+          <img id="captcha-img" alt="captcha" src="/captcha/$token">
+        </div>
+        <p class="hint" style="margin:6px 0 0">点验证码图片可刷新；图片由插件代理拉取。</p>
+      </div>
+      <div class="actions">
+        <button class="primary" type="submit" id="submit-btn">提交</button>
+        <button class="secondary" type="button" id="cancel-btn">取消</button>
+      </div>
+      <div id="status" class="status"></div>
+    </form>
+  </main>
+  <script>
+    (function() {
+      const token = "$token";
+      const form = document.getElementById("login-form");
+      const status = document.getElementById("status");
+      const img = document.getElementById("captcha-img");
+      const submitBtn = document.getElementById("submit-btn");
+      const cancelBtn = document.getElementById("cancel-btn");
+
+      function setStatus(text, ok) {
+        status.textContent = text;
+        status.className = "status " + (ok ? "ok" : "err");
+      }
+
+      function refreshCaptcha() {
+        img.src = "/captcha/" + encodeURIComponent(token) + "?_=" + Date.now();
+      }
+
+      img.addEventListener("click", refreshCaptcha);
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        submitBtn.disabled = true;
+        setStatus("提交中…", true);
+        const data = new FormData(form);
+        try {
+          const response = await fetch("/login/" + encodeURIComponent(token), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              username: data.get("username") || "",
+              password: data.get("password") || "",
+              captcha: data.get("captcha") || "",
+            }),
+          });
+          const payload = await response.json();
+          setStatus(payload.message || "", payload.ok);
+          if (payload.ok) {
+            form.reset();
+            submitBtn.disabled = true;
+            cancelBtn.disabled = true;
+          } else {
+            submitBtn.disabled = false;
+            refreshCaptcha();
+          }
+        } catch (err) {
+          submitBtn.disabled = false;
+          setStatus("网络异常：" + err.message, false);
+        }
+      });
+
+      cancelBtn.addEventListener("click", async () => {
+        cancelBtn.disabled = true;
+        try {
+          const response = await fetch("/cancel/" + encodeURIComponent(token), { method: "POST" });
+          const payload = await response.json();
+          setStatus(payload.message || "已取消登录。", payload.ok);
+          submitBtn.disabled = true;
+        } catch (err) {
+          cancelBtn.disabled = false;
+          setStatus("网络异常：" + err.message, false);
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import tempfile
 import time
+from pathlib import Path
 
 from quart import jsonify, request
 
@@ -9,13 +11,20 @@ from astrbot.api import AstrBotConfig
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.star import Context, Star
 
-from .src.api.client import SouthPlusClient, SouthPlusLoginError
-from .src.api.models import LoginRequest, LoginResult
+from .src.southplus.api import (
+    LoginRequest,
+    LoginResult,
+    SouthPlusClient,
+    SouthPlusLoginError,
+    SouthPlusProfileClient,
+    SouthPlusProfileError,
+)
 from .src.core.auth_server import CredentialFormServer
 from .src.core.config_manager import PluginConfigManager
 from .src.core.data_source import CredentialStore
 from .src.core.datamodels import CredentialSession
 from .src.core.logger import plugin_logger
+from .src.core.user_card_render import render_user_card
 from .src.shared.constants import PLUGIN_NAME
 
 
@@ -97,6 +106,38 @@ class SouthPlusPlugin(Star):
             cookie=refreshed_cookie,
         )
         yield event.plain_result("Cookie 已保存并通过登录态检查。")
+
+    @filter.command("spprofile")
+    async def sp_profile(self, event: AstrMessageEvent):
+        """抓取并渲染当前用户的 South Plus 资料卡片。"""
+        credential = self.store.get(event.get_sender_id())
+        if not credential or not credential.cookie:
+            yield event.plain_result("未绑定凭证，请先 /splogin")
+            return
+        try:
+            profile_client = SouthPlusProfileClient(
+                self.config_snapshot.endpoints,
+                http_proxy=self.config_snapshot.http_proxy,
+            )
+            # httpx 是同步 client；丢到 executor 里跑避免阻塞事件循环。
+            profile = await asyncio.to_thread(profile_client.fetch, credential.cookie)
+            png_bytes = await asyncio.to_thread(render_user_card, profile)
+        except SouthPlusProfileError as exc:
+            yield event.plain_result(f"获取资料失败：{exc}")
+            return
+        except Exception as exc:  # noqa: BLE001
+            plugin_logger.exception("spprofile 渲染失败")
+            yield event.plain_result(f"获取资料失败：{exc}")
+            return
+
+        # AstrBot 4.25 的 image_result 只接路径，把 PNG 落盘到临时文件。
+        tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+        try:
+            tmp.write(png_bytes)
+            tmp.flush()
+        finally:
+            tmp.close()
+        yield event.image_result(str(Path(tmp.name)))
 
     async def _expire_login_later(self, session: CredentialSession) -> None:
         ttl = max(1, int(session.expires_at - time.time()))

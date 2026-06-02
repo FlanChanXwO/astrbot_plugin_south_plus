@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from src.api.client import SouthPlusClient, SouthPlusLoginError
-from src.api.models import LoginRequest, SouthPlusEndpoints
+from src.southplus.api import (
+    LoginRequest,
+    SouthPlusClient,
+    SouthPlusEndpoints,
+    SouthPlusLoginError,
+)
 from tests.conftest import MockSouthPlusState
 
 

@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ..api.models import SouthPlusEndpoints
+from ..southplus.api import SouthPlusEndpoints
 from ..utils import mask_secret
 
 
