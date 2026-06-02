@@ -199,3 +199,81 @@ def test_parse_handles_html_entities() -> None:
     profile = parse_profile_html(body)
     assert profile.username == "bob"
     assert "hello" in profile.signature
+
+
+# --- 头像 .pic > img 选择器与 absolutize -----------------------------------
+
+
+def test_parse_avatar_uses_pic_class_selector() -> None:
+    """phpwind profile.php 的真实头像锚点：``class="pic"`` + 内部 <img>。"""
+
+    body = (
+        "<html><body><p>个人资料</p><p>数字ID: 42</p>"
+        '<div class="pic"><a href="modify.php"><img src="attachment/photo/2030219.jpg" alt="头像"></a></div>'
+        "</body></html>"
+    )
+    profile = parse_profile_html(body)
+    # 相对 URL 已被 absolutize。
+    assert (
+        profile.avatar_url == "https://bbs.south-plus.org/attachment/photo/2030219.jpg"
+    )
+
+
+def test_parse_avatar_pic_class_supports_td() -> None:
+    """phpwind 模板里 ``.pic`` 也可能是 ``<td class="pic">``。"""
+
+    body = (
+        "<html><body><p>个人资料</p><p>数字ID: 42</p>"
+        '<td class="pic"><img src="//cdn.example.com/face.png"></td>'
+        "</body></html>"
+    )
+    profile = parse_profile_html(body)
+    # 协议相对（//cdn...）被补成 https。
+    assert profile.avatar_url == "https://cdn.example.com/face.png"
+
+
+def test_parse_avatar_absolute_url_is_kept() -> None:
+    body = (
+        "<html><body><p>个人资料</p><p>数字ID: 42</p>"
+        '<div class="pic"><img src="https://other.com/foo.jpg"></div>'
+        "</body></html>"
+    )
+    profile = parse_profile_html(body)
+    assert profile.avatar_url == "https://other.com/foo.jpg"
+
+
+def test_parse_avatar_falls_back_to_logo_when_missing() -> None:
+    body = "<html><body><p>个人资料</p><p>数字ID: 42</p></body></html>"
+    profile = parse_profile_html(body)
+    # 没头像 -> 用站点 logo 占位。
+    assert profile.avatar_url.startswith("https://bbs.south-plus.org/")
+    assert "logo" in profile.avatar_url
+
+
+# --- username 用 UID 邻接锚定 -----------------------------------------------
+
+
+def test_parse_username_anchors_on_uid_when_inline_layout() -> None:
+    """模拟用户截图里的 ``flanchan (数字ID:2030219) 编辑资料`` 排版。"""
+
+    body = (
+        "<html><body><p>个人资料</p>"
+        "<h2><a>flanchan</a> <span>(数字ID:2030219)</span> <a>编辑资料</a></h2>"
+        '<div class="pic"><img src="/u/2030219.jpg"></div>'
+        "</body></html>"
+    )
+    profile = parse_profile_html(body)
+    assert profile.uid == "2030219"
+    assert profile.username == "flanchan"
+
+
+def test_parse_username_falls_back_to_label_form_when_no_inline_layout() -> None:
+    body = (
+        "<html><body><p>个人资料</p>"
+        "<p>用户名: <b>carol</b></p>"
+        "<p>数字ID: 999</p>"
+        "</body></html>"
+    )
+    profile = parse_profile_html(body)
+    assert profile.uid == "999"
+    assert profile.username == "carol"

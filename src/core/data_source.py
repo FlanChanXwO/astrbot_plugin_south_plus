@@ -1,3 +1,12 @@
+"""SQLite 持久化层：聊天用户 -> South Plus 账号的多对多绑定。
+
+约束：
+
+* 每个南+ UID 在数据库里全局只能被一个 ``user_key`` 绑定（uid PK）。
+* 同一个 ``user_key`` 可以绑定多个 UID；任何时刻最多一个 ``is_active = 1``。
+* Cookie 通过 ``utils.crypto`` 透明加解密（key 留空时退化明文，仅本机调试）。
+"""
+
 from __future__ import annotations
 
 import sqlite3
@@ -5,11 +14,11 @@ import threading
 from pathlib import Path
 
 from ..utils import decrypt_secret, encrypt_secret, now_iso
-from .datamodels import StoredCredential
+from .datamodels import AddAccountResult, AddAccountStatus, StoredAccount
 from .logger import plugin_logger
 
 
-class CredentialStore:
+class AccountStore:
     def __init__(self, db_path: Path, *, cookie_encryption_key: str = "") -> None:
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -30,13 +39,13 @@ class CredentialStore:
         with self._lock, self._connect() as conn:
             conn.execute(
                 """
-                CREATE TABLE IF NOT EXISTS credentials (
-                    user_key TEXT PRIMARY KEY,
+                CREATE TABLE IF NOT EXISTS accounts (
+                    uid TEXT PRIMARY KEY,
+                    user_key TEXT NOT NULL,
                     unified_msg_origin TEXT NOT NULL,
                     username TEXT NOT NULL DEFAULT '',
                     cookie TEXT NOT NULL DEFAULT '',
-                    enabled INTEGER NOT NULL DEFAULT 1,
-                    schedule_time TEXT NOT NULL DEFAULT '',
+                    is_active INTEGER NOT NULL DEFAULT 0,
                     last_status TEXT NOT NULL DEFAULT '',
                     last_message TEXT NOT NULL DEFAULT '',
                     last_run_at TEXT NOT NULL DEFAULT '',
@@ -45,111 +54,210 @@ class CredentialStore:
                 )
                 """
             )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_accounts_user_key ON accounts(user_key)"
+            )
             conn.commit()
 
-    def upsert_credential(
+    # --- 绑定 / 刷新 -------------------------------------------------------
+
+    def add_or_update(
         self,
         *,
+        uid: str,
         user_key: str,
         unified_msg_origin: str,
         username: str,
         cookie: str,
-        enabled: bool = True,
-        schedule_time: str = "",
-    ) -> None:
-        stamp = now_iso()
+    ) -> AddAccountResult:
+        """登录成功后调用。按 UID 唯一性决定走哪个分支：
+
+        * UID 不存在 -> 插入，置为当前用户的激活账号。``CREATED``。
+        * UID 已存在且属于同一个 ``user_key`` -> 更新 cookie/username 并把它
+          设为激活账号。``REFRESHED``。
+        * UID 已存在且属于另一个 ``user_key`` -> 不动数据库，原样返回占用
+          者的行。``OWNED_BY_OTHER``。
+        """
+
+        if not uid:
+            raise ValueError("uid 不能为空")
         encrypted_cookie = encrypt_secret(cookie, self._cookie_key) if cookie else ""
+        stamp = now_iso()
         with self._lock, self._connect() as conn:
-            conn.execute(
-                """
-                INSERT INTO credentials (
-                    user_key, unified_msg_origin, username, cookie, enabled,
-                    schedule_time, created_at, updated_at
+            existing = conn.execute(
+                "SELECT * FROM accounts WHERE uid = ?", (uid,)
+            ).fetchone()
+            if existing is not None and existing["user_key"] != user_key:
+                return AddAccountResult(
+                    status=AddAccountStatus.OWNED_BY_OTHER,
+                    account=self._row_to_account(existing),
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(user_key) DO UPDATE SET
-                    unified_msg_origin = excluded.unified_msg_origin,
-                    username = excluded.username,
-                    cookie = excluded.cookie,
-                    enabled = excluded.enabled,
-                    schedule_time = excluded.schedule_time,
-                    updated_at = excluded.updated_at
-                """,
-                (
-                    user_key,
-                    unified_msg_origin,
-                    username,
-                    encrypted_cookie,
-                    1 if enabled else 0,
-                    schedule_time,
-                    stamp,
-                    stamp,
-                ),
-            )
+
+            if existing is None:
+                conn.execute(
+                    "UPDATE accounts SET is_active = 0 WHERE user_key = ?",
+                    (user_key,),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO accounts (
+                        uid, user_key, unified_msg_origin, username, cookie,
+                        is_active, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+                    """,
+                    (
+                        uid,
+                        user_key,
+                        unified_msg_origin,
+                        username,
+                        encrypted_cookie,
+                        stamp,
+                        stamp,
+                    ),
+                )
+                status = AddAccountStatus.CREATED
+            else:
+                conn.execute(
+                    "UPDATE accounts SET is_active = 0 WHERE user_key = ?",
+                    (user_key,),
+                )
+                conn.execute(
+                    """
+                    UPDATE accounts SET
+                        unified_msg_origin = ?,
+                        username = ?,
+                        cookie = ?,
+                        is_active = 1,
+                        updated_at = ?
+                    WHERE uid = ?
+                    """,
+                    (
+                        unified_msg_origin,
+                        username,
+                        encrypted_cookie,
+                        stamp,
+                        uid,
+                    ),
+                )
+                status = AddAccountStatus.REFRESHED
             conn.commit()
 
-    def update_run_result(
-        self,
-        user_key: str,
-        *,
-        status: str,
-        message: str,
-    ) -> None:
-        with self._lock, self._connect() as conn:
-            conn.execute(
-                """
-                UPDATE credentials
-                SET last_status = ?, last_message = ?, last_run_at = ?, updated_at = ?
-                WHERE user_key = ?
-                """,
-                (status, message, now_iso(), now_iso(), user_key),
-            )
-            conn.commit()
+            row = conn.execute(
+                "SELECT * FROM accounts WHERE uid = ?", (uid,)
+            ).fetchone()
+        return AddAccountResult(status=status, account=self._row_to_account(row))
 
-    def set_enabled(self, user_key: str, enabled: bool) -> None:
-        with self._lock, self._connect() as conn:
-            conn.execute(
-                "UPDATE credentials SET enabled = ?, updated_at = ? WHERE user_key = ?",
-                (1 if enabled else 0, now_iso(), user_key),
-            )
-            conn.commit()
+    # --- 查询 -------------------------------------------------------------
 
-    def set_schedule(self, user_key: str, schedule_time: str) -> None:
-        with self._lock, self._connect() as conn:
-            conn.execute(
-                "UPDATE credentials SET schedule_time = ?, updated_at = ? WHERE user_key = ?",
-                (schedule_time, now_iso(), user_key),
-            )
-            conn.commit()
-
-    def delete(self, user_key: str) -> None:
-        with self._lock, self._connect() as conn:
-            conn.execute("DELETE FROM credentials WHERE user_key = ?", (user_key,))
-            conn.commit()
-
-    def get(self, user_key: str) -> StoredCredential | None:
+    def get_active(self, user_key: str) -> StoredAccount | None:
         with self._lock, self._connect() as conn:
             row = conn.execute(
-                "SELECT * FROM credentials WHERE user_key = ?",
+                "SELECT * FROM accounts WHERE user_key = ? AND is_active = 1",
                 (user_key,),
             ).fetchone()
-        return self._row_to_credential(row) if row else None
+        return self._row_to_account(row) if row else None
 
-    def list_all(self) -> list[StoredCredential]:
+    def get_by_uid(self, uid: str) -> StoredAccount | None:
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM accounts WHERE uid = ?",
+                (uid,),
+            ).fetchone()
+        return self._row_to_account(row) if row else None
+
+    def list_for_user(self, user_key: str) -> list[StoredAccount]:
         with self._lock, self._connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM credentials ORDER BY updated_at DESC",
+                "SELECT * FROM accounts WHERE user_key = ? ORDER BY is_active DESC, updated_at DESC",
+                (user_key,),
             ).fetchall()
-        return [self._row_to_credential(row) for row in rows]
+        return [self._row_to_account(row) for row in rows]
 
-    def _row_to_credential(self, row: sqlite3.Row) -> StoredCredential:
-        return StoredCredential(
+    def list_all(self) -> list[StoredAccount]:
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM accounts ORDER BY updated_at DESC",
+            ).fetchall()
+        return [self._row_to_account(row) for row in rows]
+
+    # --- 切换 / 删除 -------------------------------------------------------
+
+    def switch_active(self, user_key: str, uid: str) -> bool:
+        """把 ``uid`` 设为 ``user_key`` 的激活账号。``uid`` 必须属于该用户。
+
+        返回 ``True`` 表示切换成功；``False`` 表示该 ``user_key`` 没有这条
+        绑定（uid 不存在或被别人占用）。
+        """
+
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                "SELECT user_key FROM accounts WHERE uid = ?",
+                (uid,),
+            ).fetchone()
+            if row is None or row["user_key"] != user_key:
+                return False
+            conn.execute(
+                "UPDATE accounts SET is_active = 0 WHERE user_key = ?",
+                (user_key,),
+            )
+            conn.execute(
+                "UPDATE accounts SET is_active = 1, updated_at = ? WHERE uid = ?",
+                (now_iso(), uid),
+            )
+            conn.commit()
+        return True
+
+    def delete_account(self, user_key: str, uid: str) -> bool:
+        """删除属于 ``user_key`` 的某条绑定。返回 ``True`` 表示删除成功。"""
+
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                "SELECT user_key, is_active FROM accounts WHERE uid = ?",
+                (uid,),
+            ).fetchone()
+            if row is None or row["user_key"] != user_key:
+                return False
+            conn.execute("DELETE FROM accounts WHERE uid = ?", (uid,))
+            # 若被删的是激活账号，自动把该用户最新一条设回激活。
+            if row["is_active"]:
+                fallback = conn.execute(
+                    "SELECT uid FROM accounts WHERE user_key = ? "
+                    "ORDER BY updated_at DESC LIMIT 1",
+                    (user_key,),
+                ).fetchone()
+                if fallback is not None:
+                    conn.execute(
+                        "UPDATE accounts SET is_active = 1, updated_at = ? WHERE uid = ?",
+                        (now_iso(), fallback["uid"]),
+                    )
+            conn.commit()
+        return True
+
+    # --- 运行结果 ---------------------------------------------------------
+
+    def update_run_result(self, uid: str, *, status: str, message: str) -> None:
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE accounts
+                SET last_status = ?, last_message = ?, last_run_at = ?, updated_at = ?
+                WHERE uid = ?
+                """,
+                (status, message, now_iso(), now_iso(), uid),
+            )
+            conn.commit()
+
+    # --- 行转模型 ---------------------------------------------------------
+
+    def _row_to_account(self, row: sqlite3.Row) -> StoredAccount:
+        return StoredAccount(
+            uid=row["uid"],
             user_key=row["user_key"],
             unified_msg_origin=row["unified_msg_origin"],
             username=row["username"],
             cookie=self._decode_cookie(row["cookie"]),
-            enabled=bool(row["enabled"]),
-            schedule_time=row["schedule_time"],
+            is_active=bool(row["is_active"]),
             last_status=row["last_status"],
             last_message=row["last_message"],
             last_run_at=row["last_run_at"],

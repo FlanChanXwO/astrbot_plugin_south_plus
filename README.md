@@ -4,15 +4,19 @@ South Plus 多用户凭证与自动任务管理插件。
 
 ## 当前能力
 
-- `/splogin` 生成一次性临时登录链接（默认有效 10 分钟）。
-- 用户在临时网页表单里填写账号、密码、人工验证码；插件后端代理拉取站点验证码图片。登录页带南+ logo，整体配色贴近原站。
-- 登录成功后只保存匹配域的 Cookie，并按配置加密写入 SQLite；账号密码不落库、不打日志。
+- `/splogin` 生成一次性临时登录链接（默认有效 10 分钟）。登录页带南+ logo，整体配色贴近原站。
+- 用户在临时网页表单里填写账号、密码、人工验证码；插件后端代理拉取站点验证码图片。登录成功后插件立即抓 `profile.php` 取真实 UID 与用户名再入库。
+- **多账号绑定**：同一聊天用户可绑定多个南+ UID，每个 UID 在全局只能被一个聊天用户持有；重复绑定按"已是自己"/"被他人占用"分类提示。
+- 登录成功提示形如：`登录成功：用户名：xxx，id：xxx`。
+- `/spprofile` 用当前激活账号抓 `https://bbs.south-plus.org/profile.php` 并用 Pillow 渲染资料卡片（含头像 + 用户名 + UID + 14 项数值）。
+- `/spuidlist` 列出已绑定 UID（带激活标记）。
+- `/spswitch <uid>` 切换激活账号。
+- `/spdelete <uid>` 删除指定 UID 绑定；如果删的是激活账号，自动用最近使用的另一条接管激活位。
+- `/spbindcookie <cookie>` 直接用 Cookie 绑定（会先拉 profile 拿 UID 再入库）。
+- `/spstatus` 查看当前激活账号状态。
+- Cookie 按配置加密写入 SQLite；账号密码不落库、不打日志。
 - 链接超时、提交失败、用户取消都会有明确的页面提示和聊天回执；未知路径返回 404。
-- `/spprofile` 抓取 `https://bbs.south-plus.org/profile.php` 并用 Pillow 渲染资料卡片图（用户名 / UID / 个签 / 精华 / 发帖 / HP / 魄 / SP币 / LP / 头衔 / 在线时间 / 注册时间 / 最后登录 + 头像）。
-- `/spbindcookie <cookie>` 支持管理员直接保存 Cookie。
-- `/spstatus` 查看当前用户绑定状态。
-- `/spunbind` 删除当前用户凭证。
-- Dashboard 插件 Page 提供管理员凭证 CRUD。
+- Dashboard 插件 Page 提供管理员账号列表 / 删除 / 切换。
 
 ## 开发与运行
 
