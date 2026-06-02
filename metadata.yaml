@@ -1,0 +1,10 @@
+name: astrbot_plugin_south_plus
+display_name: South Plus 自动任务
+desc: South Plus 多用户凭证与自动任务管理插件。
+version: 0.1.0
+author: flanchan
+repo: https://github.com/flanchan/astrbot_plugin_south_plus
+astrbot_version: ">=4.25,<5"
+support_platforms:
+  - all
+

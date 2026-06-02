@@ -1,0 +1,44 @@
+{
+  "auth_listen_host": {
+    "description": "一次性登录链接 HTTP server 监听地址",
+    "type": "string",
+    "hint": "本机测试用 127.0.0.1；要让外部用户打开链接，必须配合反向代理或公网地址。",
+    "default": "127.0.0.1"
+  },
+  "auth_listen_port": {
+    "description": "一次性登录链接 HTTP server 监听端口",
+    "type": "int",
+    "hint": "0 表示启动时随机选择空闲端口。",
+    "default": 0
+  },
+  "auth_base_url": {
+    "description": "登录链接展示给用户的公开根地址",
+    "type": "string",
+    "hint": "留空时用监听地址和实际端口生成本地链接；公网部署填写 HTTPS 反代后的根地址，不要带尾斜杠。",
+    "default": ""
+  },
+  "auth_token_ttl_seconds": {
+    "description": "一次性登录链接有效期（秒）",
+    "type": "int",
+    "hint": "默认 600 秒；过期后链接失效并通知用户。",
+    "default": 600
+  },
+  "cookie_encryption_key": {
+    "description": "持久化 Cookie 的加密 key（任意字符串，留空则明文存储）",
+    "type": "string",
+    "hint": "建议填写至少 32 字符的随机串。留空时 cookie 以明文写入 SQLite，仅适用于本机调试。",
+    "default": ""
+  },
+  "user_agent": {
+    "description": "请求 South Plus 时使用的 User-Agent",
+    "type": "string",
+    "hint": "留空时使用 src/api/constants.py 中的 DEFAULT_USER_AGENT。",
+    "default": ""
+  },
+  "http_proxy": {
+    "description": "请求 South Plus 时使用的 HTTP/HTTPS 代理",
+    "type": "string",
+    "hint": "例如 http://127.0.0.1:7890。留空时遵循进程的 HTTPS_PROXY 环境变量；二者都没有则直连。",
+    "default": ""
+  }
+}
