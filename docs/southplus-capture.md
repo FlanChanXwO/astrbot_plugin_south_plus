@@ -1,6 +1,6 @@
 # South Plus 抓包与逆向流程
 
-> **Capture 日期：2026-06-03**（增补：`/ck.php` 必须带 `nowtime=<毫秒时间戳>` 才返回真验证码）
+> **Capture 日期：2026-06-03**（增补：`/ck.php` 必须带 `nowtime=<毫秒时间戳>` 才返回真验证码；新增社区签到接口 `plugin.php?H_name=tasks` 抓包）
 >
 > **维护规则（仅适用于本文档）**
 > - 每次重新抓包，无论结果是否变化，都必须更新顶部 "Capture 日期" 为当次抓包的日期 (YYYY-MM-DD)。
@@ -243,6 +243,47 @@ file /tmp/sp_captcha.bin
 2. 同步更新本文档顶部 **Capture 日期**（哪怕只是落点重命名也要更新——日期反映"文档与代码状态的对齐时间戳"）。
 3. 同步更新 `tests/conftest.py` 的 mock South Plus server（让 mock 行为与真实站点一致）。
 4. 跑 `python -m pytest`，确保所有 client / auth_server 测试通过。
+
+## 社区签到接口（plugin.php tasks）
+
+> 参考实现：[`MeYangGe/SouthPlusQianDao`](https://github.com/MeYangGe/SouthPlusQianDao) 的 `APPLYDAILY.py / COLLECTDAILY.py / APPLYWEEKLY.py / COLLECTWEEKLY.py`。
+
+南+ 的"社区论坛任务"位于 `https://bbs.south-plus.org/plugin.php?H_name-tasks.html`，分两类：
+
+| 任务 | cid |
+| --- | --- |
+| 日常签到 | `15` |
+| 周常签到 | `14` |
+
+每个任务都是两步：先**申请**，再**领取奖励**。
+
+| 步骤 | URL params | 含义 |
+| --- | --- | --- |
+| apply | `H_name=tasks&action=ajax&actions=job&cid=<cid>&nowtime=<ms>&verify=5af36471` | 申请任务（"进行中任务"） |
+| collect | `H_name=tasks&action=ajax&actions=job2&cid=<cid>&nowtime=<ms>&verify=5af36471` | 领取奖励（"已完成任务"） |
+
+GET，cookie 必带 `eb9e6_winduser` 等登录 cookie，UA 与登录抓包同。
+
+**响应**：`<root><![CDATA[ action\tmessage[\textra] ]]></root>`。`action` 用得不多，`message` 是面向用户的中文文案。`extra` 在 collect 阶段可能携带具体奖励额度。
+
+**关键字判定**：
+
+| 阶段 | 文案 | 处理 |
+| --- | --- | --- |
+| apply | 含 `已完成 / 已领取 / 请勿重复 / 重复 / 已经 / 今天已经 / 本周已经` | `ALREADY_DONE`，**跳过 collect**，节省一次请求 |
+| apply | 含 `完成 / 奖励 / 成功 / 申请 / 领取 / 进行中` | 进入 collect |
+| collect | 含 `请勿重复 / 重复 / 已经 / 已领取 / 今天已经 / 本周已经` | `ALREADY_DONE`（注意不要把"已完成"误判，它在 collect 阶段是字面正常领取） |
+| collect | 含 `完成 / 奖励 / 成功 / 申请 / 领取 / 进行中` | `SUCCESS` |
+| 任意阶段 | 都不命中 / `<root>` parse 失败 / 网络异常 | `FAILED`，原始响应体进 `error` 字段，便于落库排查 |
+
+**verify 字段**：参考仓库观察到是固定 `5af36471`，似乎暂未做严格校验；保留为常量。改版后如发现 401/拒绝，应改为从 tasks 页面 HTML 抓 `verify` token。落地在 `src/southplus/checkin_client.py::DEFAULT_VERIFY`，附 TODO。
+
+**nowtime 字段**：`int(time.time() * 1000)`，毫秒整数。参考仓库直接用固定时间戳也能跑——再次证明 verify/nowtime 当前未强校验。
+
+**多调度位置**：
+- `src/southplus/checkin_client.py::DAILY_CID / WEEKLY_CID / ACTION_APPLY / ACTION_COLLECT / DEFAULT_VERIFY`
+- 关键字表：`_SUCCESS_KEYWORDS / _ALREADY_DONE_KEYWORDS / _REPEAT_KEYWORDS`
+- 入口 referer：`TASKS_REFERER`
 
 ## 验证抓包结果是否仍然有效
 

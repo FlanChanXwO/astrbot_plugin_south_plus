@@ -84,6 +84,27 @@ class AddAccountResult:
 
 
 @dataclass(slots=True)
+class CheckinRecord:
+    """``checkin_record`` 表的一行——按南+ UID 记录最近一次日 / 周签到状态。
+
+    日签和周签独立，各自记录最近的 ``YYYY-MM-DD`` 日期、状态文案、报错原文。
+    error 字段独立于 message，便于排查；message 给用户看。
+    """
+
+    uid: str
+    last_daily_date: str
+    last_daily_status: str
+    last_daily_message: str
+    last_daily_error: str
+    last_weekly_date: str
+    last_weekly_status: str
+    last_weekly_message: str
+    last_weekly_error: str
+    created_at: str
+    updated_at: str
+
+
+@dataclass(slots=True)
 class AuthServerConfig:
     listen_host: str
     listen_port: int

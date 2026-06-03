@@ -13,9 +13,13 @@
   ── 登录会话门面与异常。
 """
 
+from ..checkin_client import SouthPlusCheckinClient, SouthPlusCheckinError
 from ..client import SouthPlusClient, SouthPlusLoginAttempt, SouthPlusLoginError
 from ..models import (
     CaptchaPayload,
+    CheckinReport,
+    CheckinStatus,
+    CheckinTaskResult,
     LoginRequest,
     LoginResult,
     SouthPlusEndpoints,
@@ -26,8 +30,13 @@ from ..profile_client import SouthPlusProfileClient, SouthPlusProfileError
 
 __all__ = [
     "CaptchaPayload",
+    "CheckinReport",
+    "CheckinStatus",
+    "CheckinTaskResult",
     "LoginRequest",
     "LoginResult",
+    "SouthPlusCheckinClient",
+    "SouthPlusCheckinError",
     "SouthPlusClient",
     "SouthPlusEndpoints",
     "SouthPlusLoginAttempt",

@@ -14,7 +14,12 @@ import threading
 from pathlib import Path
 
 from ..utils import decrypt_secret, encrypt_secret, now_iso
-from .datamodels import AddAccountResult, AddAccountStatus, StoredAccount
+from .datamodels import (
+    AddAccountResult,
+    AddAccountStatus,
+    CheckinRecord,
+    StoredAccount,
+)
 from .logger import plugin_logger
 
 
@@ -273,3 +278,148 @@ class AccountStore:
         except ValueError as exc:
             plugin_logger.error(f"Cookie 解密失败：{exc}")
             return ""
+
+
+class CheckinStore:
+    """``checkin_record`` 表的持久化层。
+
+    与 ``AccountStore`` 解耦：签到记录按南+ UID 主键归档，与聊天用户绑定
+    无关。``upsert_daily`` / ``upsert_weekly`` 单字段更新各自维度的状态。
+    """
+
+    def __init__(self, db_path: Path) -> None:
+        self.db_path = db_path
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.RLock()
+        self._init_db()
+
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _init_db(self) -> None:
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS checkin_record (
+                    uid TEXT PRIMARY KEY,
+                    last_daily_date TEXT NOT NULL DEFAULT '',
+                    last_daily_status TEXT NOT NULL DEFAULT '',
+                    last_daily_message TEXT NOT NULL DEFAULT '',
+                    last_daily_error TEXT NOT NULL DEFAULT '',
+                    last_weekly_date TEXT NOT NULL DEFAULT '',
+                    last_weekly_status TEXT NOT NULL DEFAULT '',
+                    last_weekly_message TEXT NOT NULL DEFAULT '',
+                    last_weekly_error TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.commit()
+
+    def get(self, uid: str) -> CheckinRecord | None:
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM checkin_record WHERE uid = ?", (uid,)
+            ).fetchone()
+        return self._row_to_record(row) if row else None
+
+    def upsert_daily(
+        self,
+        uid: str,
+        *,
+        date: str,
+        status: str,
+        message: str,
+        error: str = "",
+    ) -> None:
+        self._upsert_field(
+            uid,
+            updates={
+                "last_daily_date": date,
+                "last_daily_status": status,
+                "last_daily_message": message,
+                "last_daily_error": error,
+            },
+        )
+
+    def upsert_weekly(
+        self,
+        uid: str,
+        *,
+        date: str,
+        status: str,
+        message: str,
+        error: str = "",
+    ) -> None:
+        self._upsert_field(
+            uid,
+            updates={
+                "last_weekly_date": date,
+                "last_weekly_status": status,
+                "last_weekly_message": message,
+                "last_weekly_error": error,
+            },
+        )
+
+    def _upsert_field(self, uid: str, *, updates: dict[str, str]) -> None:
+        stamp = now_iso()
+        with self._lock, self._connect() as conn:
+            existing = conn.execute(
+                "SELECT uid FROM checkin_record WHERE uid = ?", (uid,)
+            ).fetchone()
+            if existing is None:
+                full: dict[str, str] = {
+                    "uid": uid,
+                    "last_daily_date": "",
+                    "last_daily_status": "",
+                    "last_daily_message": "",
+                    "last_daily_error": "",
+                    "last_weekly_date": "",
+                    "last_weekly_status": "",
+                    "last_weekly_message": "",
+                    "last_weekly_error": "",
+                    "created_at": stamp,
+                    "updated_at": stamp,
+                }
+                full.update(updates)
+                conn.execute(
+                    """
+                    INSERT INTO checkin_record (
+                        uid, last_daily_date, last_daily_status, last_daily_message,
+                        last_daily_error, last_weekly_date, last_weekly_status,
+                        last_weekly_message, last_weekly_error, created_at, updated_at
+                    ) VALUES (
+                        :uid, :last_daily_date, :last_daily_status, :last_daily_message,
+                        :last_daily_error, :last_weekly_date, :last_weekly_status,
+                        :last_weekly_message, :last_weekly_error, :created_at, :updated_at
+                    )
+                    """,
+                    full,
+                )
+            else:
+                set_clause = ", ".join(f"{k} = :{k}" for k in updates)
+                params: dict[str, str] = {**updates, "uid": uid, "updated_at": stamp}
+                conn.execute(
+                    f"UPDATE checkin_record SET {set_clause}, updated_at = :updated_at WHERE uid = :uid",
+                    params,
+                )
+            conn.commit()
+
+    @staticmethod
+    def _row_to_record(row: sqlite3.Row) -> CheckinRecord:
+        return CheckinRecord(
+            uid=row["uid"],
+            last_daily_date=row["last_daily_date"],
+            last_daily_status=row["last_daily_status"],
+            last_daily_message=row["last_daily_message"],
+            last_daily_error=row["last_daily_error"],
+            last_weekly_date=row["last_weekly_date"],
+            last_weekly_status=row["last_weekly_status"],
+            last_weekly_message=row["last_weekly_message"],
+            last_weekly_error=row["last_weekly_error"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )

@@ -11,7 +11,7 @@
 
 from .crypto import decrypt_secret, encrypt_secret
 from .text import generate_token, mask_secret
-from .timeutil import expires_at_after, now_iso
+from .timeutil import current_iso_week, current_local_date, expires_at_after, now_iso
 from .url import (
     derive_cookie_domains_from_url,
     derive_default_endpoint,
@@ -20,6 +20,8 @@ from .url import (
 )
 
 __all__ = [
+    "current_iso_week",
+    "current_local_date",
     "decrypt_secret",
     "derive_cookie_domains_from_url",
     "derive_default_endpoint",

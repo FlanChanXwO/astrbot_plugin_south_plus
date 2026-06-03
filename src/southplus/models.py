@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 
 from ..utils import derive_cookie_domains_from_url, join_url
 from .constants import (
@@ -74,6 +75,36 @@ class CaptchaPayload:
 
     content_type: str
     body: bytes
+
+
+class CheckinStatus(str, Enum):
+    """单项签到（日/周）的执行结果。"""
+
+    SUCCESS = "success"  # 本次跑通了 apply + collect，从站点拿到了奖励文案
+    ALREADY_DONE = "already_done"  # 站点告知今日/本周已完成（视作成功）
+    FAILED = "failed"  # 任何步骤抛错；详细错误见 ``error`` 字段
+
+
+@dataclass(slots=True)
+class CheckinTaskResult:
+    """日签或周签的单次结果。
+
+    * ``status`` ── 见 ``CheckinStatus``。
+    * ``message`` ── 给用户看的可读结果文案（来自站点 XML 的 message 段）。
+    * ``error`` ── 站点原始错误内容；用于落库以便排查，不直接展示给用户。
+    """
+
+    status: CheckinStatus
+    message: str = ""
+    error: str = ""
+
+
+@dataclass(slots=True)
+class CheckinReport:
+    """一次 ``/spcheckin`` 调用的完整结果。"""
+
+    daily: CheckinTaskResult
+    weekly: CheckinTaskResult
 
 
 @dataclass(slots=True)

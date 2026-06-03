@@ -13,24 +13,30 @@ from astrbot.api.star import Context, Star
 
 from .src.core.auth_server import CredentialFormServer
 from .src.core.config_manager import PluginConfigManager
-from .src.core.data_source import AccountStore
+from .src.core.data_source import AccountStore, CheckinStore
 from .src.core.datamodels import (
     AddAccountResult,
     AddAccountStatus,
+    CheckinRecord,
     CredentialSession,
 )
 from .src.core.logger import plugin_logger
 from .src.core.user_card_render import render_user_card
 from .src.shared.constants import PLUGIN_NAME
 from .src.southplus.api import (
+    CheckinReport,
+    CheckinStatus,
+    CheckinTaskResult,
     LoginRequest,
     LoginResult,
+    SouthPlusCheckinClient,
     SouthPlusClient,
     SouthPlusLoginError,
     SouthPlusProfileClient,
     SouthPlusProfileError,
     UserProfile,
 )
+from .src.utils import current_iso_week, current_local_date
 
 
 class SouthPlusPlugin(Star):
@@ -45,11 +51,16 @@ class SouthPlusPlugin(Star):
             self.config_snapshot.database_path,
             cookie_encryption_key=self.config_snapshot.cookie_encryption_key,
         )
+        self.checkin_store = CheckinStore(self.config_snapshot.database_path)
         self.client = SouthPlusClient(
             self.config_snapshot.endpoints,
             http_proxy=self.config_snapshot.http_proxy,
         )
         self.profile_client = SouthPlusProfileClient(
+            self.config_snapshot.endpoints,
+            http_proxy=self.config_snapshot.http_proxy,
+        )
+        self.checkin_client = SouthPlusCheckinClient(
             self.config_snapshot.endpoints,
             http_proxy=self.config_snapshot.http_proxy,
         )
@@ -237,6 +248,83 @@ class SouthPlusPlugin(Star):
         yield event.image_result(str(Path(tmp.name)))
 
     # ------------------------------------------------------------------
+    # 社区签到
+    # ------------------------------------------------------------------
+
+    @filter.command("spcheckin")
+    async def sp_checkin(self, event: AstrMessageEvent):
+        """对当前激活账号执行日签 + 周签。
+
+        策略：
+        * 先查本地 ``checkin_record`` 表，已签的维度直接复用记录，不打扰站点。
+        * 仅对"今天/本周还没签"的维度调站点接口，跑通后入库。
+        * 站点告知"已签到"也视作 ALREADY_DONE 入库，避免下次再去打扰。
+        """
+
+        active = self.store.get_active(event.get_sender_id())
+        if not active or not active.cookie:
+            yield event.plain_result(
+                "当前没有激活的 South Plus 账号。请用 /splogin 登录。"
+            )
+            return
+
+        today = current_local_date()
+        this_week = current_iso_week()
+        record = self.checkin_store.get(active.uid)
+
+        # 先决定每个维度要不要调网。
+        daily_skip = _daily_already_done(record, today)
+        weekly_skip = _weekly_already_done(record, this_week)
+
+        daily_result: CheckinTaskResult | None = None
+        weekly_result: CheckinTaskResult | None = None
+
+        if not daily_skip and not weekly_skip:
+            # 两个都要打，跑完整 checkin。
+            report: CheckinReport = await asyncio.to_thread(
+                self.checkin_client.checkin, active.cookie
+            )
+            daily_result = report.daily
+            weekly_result = report.weekly
+        elif not daily_skip:
+            daily_result = await asyncio.to_thread(
+                self.checkin_client.checkin_daily, active.cookie
+            )
+        elif not weekly_skip:
+            weekly_result = await asyncio.to_thread(
+                self.checkin_client.checkin_weekly, active.cookie
+            )
+
+        if daily_result is not None:
+            self.checkin_store.upsert_daily(
+                active.uid,
+                date=today,
+                status=daily_result.status.value,
+                message=daily_result.message,
+                error=daily_result.error,
+            )
+        if weekly_result is not None:
+            self.checkin_store.upsert_weekly(
+                active.uid,
+                date=this_week,
+                status=weekly_result.status.value,
+                message=weekly_result.message,
+                error=weekly_result.error,
+            )
+
+        yield event.plain_result(
+            _format_checkin_response(
+                username=active.username or active.uid,
+                uid=active.uid,
+                today=today,
+                this_week=this_week,
+                record=self.checkin_store.get(active.uid),
+                fresh_daily=daily_result,
+                fresh_weekly=weekly_result,
+            )
+        )
+
+    # ------------------------------------------------------------------
     # 登录回调（auth server worker 线程调用）
     # ------------------------------------------------------------------
 
@@ -395,3 +483,88 @@ def _format_add_result(result: AddAccountResult, profile: UserProfile) -> str:
         f"该 UID（{uid}）已被其他用户绑定，无法绑定。\n"
         "如确需迁移，请联系管理员从数据库删除该 UID 的旧绑定后再试。"
     )
+
+
+# --- 签到 helper -----------------------------------------------------------
+
+
+def _daily_already_done(record: CheckinRecord | None, today: str) -> bool:
+    """checkin_record 中今天的日签是 success 或 already_done 就跳过站点。"""
+
+    if record is None or record.last_daily_date != today:
+        return False
+    return record.last_daily_status in (
+        CheckinStatus.SUCCESS.value,
+        CheckinStatus.ALREADY_DONE.value,
+    )
+
+
+def _weekly_already_done(record: CheckinRecord | None, this_week: str) -> bool:
+    if record is None or record.last_weekly_date != this_week:
+        return False
+    return record.last_weekly_status in (
+        CheckinStatus.SUCCESS.value,
+        CheckinStatus.ALREADY_DONE.value,
+    )
+
+
+def _format_checkin_response(
+    *,
+    username: str,
+    uid: str,
+    today: str,
+    this_week: str,
+    record: CheckinRecord | None,
+    fresh_daily: CheckinTaskResult | None,
+    fresh_weekly: CheckinTaskResult | None,
+) -> str:
+    """组装 ``/spcheckin`` 的回执。
+
+    一次回执包含两行——日签 + 周签。每行写：状态 emoji、是新签还是命中
+    缓存、站点 message。
+    """
+
+    daily_line = _format_dimension_line(
+        label="日签",
+        period_key=today,
+        fresh=fresh_daily,
+        cached_status=record.last_daily_status if record else "",
+        cached_message=record.last_daily_message if record else "",
+    )
+    weekly_line = _format_dimension_line(
+        label="周签",
+        period_key=this_week,
+        fresh=fresh_weekly,
+        cached_status=record.last_weekly_status if record else "",
+        cached_message=record.last_weekly_message if record else "",
+    )
+    return (
+        f"South Plus 签到结果\n"
+        f"账号：{username}（UID: {uid}）\n"
+        f"{daily_line}\n"
+        f"{weekly_line}"
+    )
+
+
+def _format_dimension_line(
+    *,
+    label: str,
+    period_key: str,
+    fresh: CheckinTaskResult | None,
+    cached_status: str,
+    cached_message: str,
+) -> str:
+    """渲染一行日签或周签结果，标注是新签 / 已缓存 / 失败。"""
+
+    if fresh is None:
+        # 没去站点，是命中缓存。
+        return (
+            f"{label}（{period_key}，缓存）: 已签到，{cached_message or cached_status}"
+        )
+    if fresh.status is CheckinStatus.SUCCESS:
+        return f"{label}（{period_key}，新签）: 成功，{fresh.message}"
+    if fresh.status is CheckinStatus.ALREADY_DONE:
+        return f"{label}（{period_key}，新签）: 已签到，{fresh.message}"
+    # FAILED
+    detail = fresh.message or fresh.error or "未知错误"
+    return f"{label}（{period_key}，新签）: 失败，{detail}"
