@@ -37,12 +37,12 @@ class SouthPlusSession:
         http_proxy: str | None = None,
     ) -> None:
         self.endpoints = endpoints
-        self._proxy = http_proxy
+        self._proxy = http_proxy or None
         self._client: httpx.Client | None = httpx.Client(
             headers={"User-Agent": endpoints.user_agent},
             follow_redirects=True,
             timeout=20.0,
-            proxy=http_proxy,
+            proxy=self._proxy,
         )
 
     @property
