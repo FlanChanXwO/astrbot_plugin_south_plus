@@ -16,11 +16,12 @@ import pytest
 
 from src.southplus.api import (
     SouthPlusEndpoints,
-    SouthPlusProfileClient,
+    SouthPlusProfileApi,
     SouthPlusProfileError,
+    SouthPlusSession,
     UserProfile,
 )
-from src.southplus.profile_client import parse_profile_html
+from src.southplus.api.profile import parse_profile_html
 
 # --- 合成 HTML --------------------------------------------------------------
 
@@ -114,8 +115,8 @@ def _endpoints() -> SouthPlusEndpoints:
     )
 
 
-def _make_client(base_url: str) -> SouthPlusProfileClient:
-    client = SouthPlusProfileClient(_endpoints())
+def _make_client(base_url: str) -> SouthPlusProfileApi:
+    client = SouthPlusProfileApi(SouthPlusSession(_endpoints()))
     # 把抓取入口指向 mock server。
     client.profile_url = f"{base_url}/profile.php"
     client.referer = f"{base_url}/"
@@ -159,7 +160,7 @@ def test_fetch_raises_on_not_logged_in(
 
 
 def test_fetch_empty_cookie_raises() -> None:
-    client = SouthPlusProfileClient(_endpoints())
+    client = SouthPlusProfileApi(SouthPlusSession(_endpoints()))
     with pytest.raises(SouthPlusProfileError):
         client.fetch(cookie_header="")
 

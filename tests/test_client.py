@@ -4,9 +4,10 @@ import pytest
 
 from src.southplus.api import (
     LoginRequest,
-    SouthPlusClient,
+    SouthPlusLoginApi,
     SouthPlusEndpoints,
     SouthPlusLoginError,
+    SouthPlusSession,
 )
 from tests.conftest import MockSouthPlusState
 
@@ -23,7 +24,7 @@ def _endpoints(state: MockSouthPlusState) -> SouthPlusEndpoints:
 
 
 def test_fetch_captcha_returns_png(mock_southplus: MockSouthPlusState) -> None:
-    client = SouthPlusClient(_endpoints(mock_southplus))
+    client = SouthPlusLoginApi(SouthPlusSession(_endpoints(mock_southplus)))
     with client.new_attempt() as attempt:
         payload = attempt.fetch_captcha()
     assert payload.body.startswith(b"\x89PNG")
@@ -33,7 +34,7 @@ def test_fetch_captcha_returns_png(mock_southplus: MockSouthPlusState) -> None:
 def test_submit_success_returns_cookie_header(
     mock_southplus: MockSouthPlusState,
 ) -> None:
-    client = SouthPlusClient(_endpoints(mock_southplus))
+    client = SouthPlusLoginApi(SouthPlusSession(_endpoints(mock_southplus)))
     with client.new_attempt() as attempt:
         attempt.fetch_captcha()
         result = attempt.submit(
@@ -49,7 +50,7 @@ def test_submit_success_returns_cookie_header(
 def test_submit_bad_captcha_classifies_failure(
     mock_southplus: MockSouthPlusState,
 ) -> None:
-    client = SouthPlusClient(_endpoints(mock_southplus))
+    client = SouthPlusLoginApi(SouthPlusSession(_endpoints(mock_southplus)))
     with client.new_attempt() as attempt:
         attempt.fetch_captcha()
         with pytest.raises(SouthPlusLoginError) as exc:
@@ -62,7 +63,7 @@ def test_submit_bad_captcha_classifies_failure(
 def test_submit_bad_password_classifies_failure(
     mock_southplus: MockSouthPlusState,
 ) -> None:
-    client = SouthPlusClient(_endpoints(mock_southplus))
+    client = SouthPlusLoginApi(SouthPlusSession(_endpoints(mock_southplus)))
     with client.new_attempt() as attempt:
         attempt.fetch_captcha()
         with pytest.raises(SouthPlusLoginError) as exc:
@@ -75,13 +76,13 @@ def test_submit_bad_password_classifies_failure(
 def test_check_cookie_passes_when_logged_in_marker_present(
     mock_southplus: MockSouthPlusState,
 ) -> None:
-    client = SouthPlusClient(_endpoints(mock_southplus))
+    client = SouthPlusLoginApi(SouthPlusSession(_endpoints(mock_southplus)))
     cookie = "eb9e6_winduser=alice; eb9e6_winduid=1"
     assert client.check_cookie(cookie) == cookie
 
 
 def test_check_cookie_rejects_login_page(mock_southplus: MockSouthPlusState) -> None:
-    client = SouthPlusClient(_endpoints(mock_southplus))
+    client = SouthPlusLoginApi(SouthPlusSession(_endpoints(mock_southplus)))
     with pytest.raises(SouthPlusLoginError):
         client.check_cookie("garbage=value")
 
@@ -89,7 +90,7 @@ def test_check_cookie_rejects_login_page(mock_southplus: MockSouthPlusState) -> 
 def test_attempt_reuses_same_cookie_jar_for_captcha_and_submit(
     mock_southplus: MockSouthPlusState,
 ) -> None:
-    client = SouthPlusClient(_endpoints(mock_southplus))
+    client = SouthPlusLoginApi(SouthPlusSession(_endpoints(mock_southplus)))
     with client.new_attempt() as attempt:
         attempt.fetch_captcha()
         attempt.fetch_captcha()

@@ -4,7 +4,7 @@ import logging
 from typing import Any
 
 from ..shared.constants import LOG_PREFIX, PLUGIN_NAME
-from ..utils import mask_secret
+from .text import mask_secret
 
 
 class PluginLogger:

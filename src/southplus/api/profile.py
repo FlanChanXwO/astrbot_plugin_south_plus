@@ -25,53 +25,26 @@ from dataclasses import fields
 from typing import Callable
 from urllib.parse import urljoin
 
-import httpx
-
-from .models import SouthPlusEndpoints, UserProfile
-
-# bbs.south-plus.org 是用户截图里 profile.php 的真实入口。主域
-# www.south-plus.net 的 profile.php 字段布局不同（截图来自 bbs 镜像），
-# 本模块只取 bbs.south-plus.org。
-BBS_BASE_URL = "https://bbs.south-plus.org"
-BBS_PROFILE_URL = f"{BBS_BASE_URL}/profile.php"
-BBS_REFERER = f"{BBS_BASE_URL}/"
-
-# 没拉到头像时的占位 URL。优先用站点 logo，避免渲染时再去网络拉一次失败。
-_FALLBACK_AVATAR_URL = f"{BBS_BASE_URL}/images/logo.png"
-
-# 登录态判定关键字。命中其中任何一个就视为 Cookie 失效。
-_NOT_LOGGED_IN_KEYWORDS = (
-    "还没有登录",
-    "暂时不能使用此功能",
-    "您没有登录",
-    "请先登录",
-    "请登录",
+from ..client import SouthPlusSession
+from ..exceptions import SouthPlusProfileError
+from .constants import (
+    BBS_BASE_URL,
+    BBS_PROFILE_URL,
+    BBS_REFERER,
+    FALLBACK_AVATAR_URL,
+    LOGGED_IN_MARKERS,
+    NOT_LOGGED_IN_KEYWORDS,
 )
+from ..models import UserProfile
 
-# 已登录证据关键字。profile.php 渲染成功时必出现"数字ID"或"个人资料"。
-_LOGGED_IN_MARKERS = (
-    "数字ID",
-    "个人资料",
-    "会员头衔",
-    "在线时间",
-)
+__all__ = ["SouthPlusProfileApi", "parse_profile_html"]
 
 
-class SouthPlusProfileError(RuntimeError):
-    """profile.php 抓取或解析失败。可向用户展示。"""
+class SouthPlusProfileApi:
+    """profile.php 抓取门面：使用共享 ``httpx.Client`` 走代理。"""
 
-
-class SouthPlusProfileClient:
-    """profile.php 抓取门面：每次 fetch 开一个新的 httpx.Client 走代理。"""
-
-    def __init__(
-        self,
-        endpoints: SouthPlusEndpoints,
-        *,
-        http_proxy: str | None = None,
-    ) -> None:
-        self.endpoints = endpoints
-        self.http_proxy = http_proxy or None
+    def __init__(self, session: SouthPlusSession) -> None:
+        self.session = session
         # 允许测试覆盖入口（注入 mock 服务器 URL）。生产路径上一直是
         # ``BBS_PROFILE_URL``。
         self.profile_url = BBS_PROFILE_URL
@@ -81,18 +54,11 @@ class SouthPlusProfileClient:
         if not cookie_header:
             raise SouthPlusProfileError("Cookie 为空，无法抓取资料。")
         headers = {
-            "User-Agent": self.endpoints.user_agent,
             "Cookie": cookie_header,
             "Referer": self.referer,
             "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
         }
-        with httpx.Client(
-            headers=headers,
-            follow_redirects=True,
-            timeout=20.0,
-            proxy=self.http_proxy,
-        ) as client:
-            response = client.get(self.profile_url)
+        response = self.session.client.get(self.profile_url, headers=headers)
         body = response.text
         # phpwind 默认 GBK，httpx 已按 Content-Type 解码；保留 fallback 处理。
         if not body:
@@ -108,21 +74,16 @@ class SouthPlusProfileClient:
         if not avatar_url:
             return None
         headers = {
-            "User-Agent": self.endpoints.user_agent,
             "Referer": self.referer,
             "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
         }
         try:
-            with httpx.Client(
-                headers=headers,
-                follow_redirects=True,
-                timeout=10.0,
-                proxy=self.http_proxy,
-            ) as client:
-                response = client.get(avatar_url)
+            response = self.session.client.get(
+                avatar_url, headers=headers, timeout=10.0
+            )
             if response.status_code == 200 and response.content:
                 return response.content
-        except httpx.HTTPError:
+        except Exception:  # noqa: BLE001
             return None
         return None
 
@@ -135,12 +96,12 @@ def parse_profile_html(raw_body: str) -> UserProfile:
     body = html.unescape(raw_body)
 
     # 先判失败态。
-    for keyword in _NOT_LOGGED_IN_KEYWORDS:
+    for keyword in NOT_LOGGED_IN_KEYWORDS:
         if keyword in body:
             raise SouthPlusProfileError("Cookie 已失效或未登录")
 
     # 再判已登录态：profile.php 真实渲染必出现"数字ID"或"个人资料"。
-    if not any(marker in body for marker in _LOGGED_IN_MARKERS):
+    if not any(marker in body for marker in LOGGED_IN_MARKERS):
         raise SouthPlusProfileError(
             "未识别到已登录的 profile 页（缺少数字ID/个人资料标记），Cookie 可能已失效。"
         )
@@ -164,7 +125,7 @@ def parse_profile_html(raw_body: str) -> UserProfile:
     _safe_set(profile, "register_date", body, _parse_register_date)
     _safe_set(profile, "last_login_date", body, _parse_last_login_date)
 
-    profile.avatar_url = _absolutize_url(profile.avatar_url) or _FALLBACK_AVATAR_URL
+    profile.avatar_url = _absolutize_url(profile.avatar_url) or FALLBACK_AVATAR_URL
 
     return profile
 

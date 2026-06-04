@@ -17,13 +17,13 @@ from urllib.parse import parse_qs, unquote, urlparse
 from ..southplus.api import (
     LoginRequest,
     LoginResult,
-    SouthPlusClient,
+    SouthPlusLoginApi,
     SouthPlusLoginAttempt,
     SouthPlusLoginError,
 )
 from ..utils import expires_at_after, generate_token
 from .datamodels import AuthServerConfig, CredentialSession
-from .logger import plugin_logger
+from ..utils.logger import plugin_logger
 
 LoginSuccessCallback = Callable[[CredentialSession, LoginRequest, LoginResult], None]
 
@@ -80,7 +80,7 @@ class CredentialFormServer:
         self,
         *,
         config: AuthServerConfig,
-        client: SouthPlusClient,
+        client: SouthPlusLoginApi,
         on_login_success: LoginSuccessCallback,
     ) -> None:
         self.config = config
@@ -128,7 +128,11 @@ class CredentialFormServer:
             server.server_close()
 
     def create_session(
-        self, *, user_key: str, unified_msg_origin: str
+        self,
+        *,
+        user_key: str,
+        unified_msg_origin: str,
+        platform: str = "",
     ) -> CredentialSession:
         self.ensure_started()
         token = generate_token()
@@ -136,6 +140,7 @@ class CredentialFormServer:
             token=token,
             user_key=user_key,
             unified_msg_origin=unified_msg_origin,
+            platform=platform,
             expires_at=expires_at_after(self.config.token_ttl_seconds),
         )
         entry = _LoginEntry(session=session)

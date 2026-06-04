@@ -1,6 +1,6 @@
 """South Plus 抓包得到的接口入参/出参/端点数据模型与工厂。
 
-抓包来的常量（默认 URL、UA、表单字段默认值等）见 ``constants`` 子模块。
+抓包来的常量（默认 URL、UA、表单字段默认值等）见 ``api.constants`` 子模块。
 本模块只保留数据模型与基于常量的工厂函数。
 """
 
@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from ..utils import derive_cookie_domains_from_url, join_url
-from .constants import (
+from .api.constants import (
     DEFAULT_CAPTCHA_PATH,
     DEFAULT_COOKIE_TTL,
     DEFAULT_HIDE_ID,
@@ -142,8 +142,8 @@ def build_endpoints(
 ) -> SouthPlusEndpoints:
     """按抓包默认值填补缺失字段，构造 ``SouthPlusEndpoints``。
 
-    任一字段传空字符串/空元组时回落到 ``constants`` 中的 ``DEFAULT_*``。
-    改默认值时改 ``constants.py`` 即可，调用方（``config_manager`` 等）
+    任一字段传空字符串/空元组时回落到 ``api.constants`` 中的 ``DEFAULT_*``。
+    改默认值时改 ``api/constants.py`` 即可，调用方（``config_manager`` 等）
     不需要感知抓包细节。
     """
 

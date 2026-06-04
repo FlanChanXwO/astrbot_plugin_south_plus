@@ -1,44 +1,104 @@
 {
-  "auth_listen_host": {
-    "description": "一次性登录链接 HTTP server 监听地址",
-    "type": "string",
-    "hint": "本机测试用 127.0.0.1；要让外部用户打开链接，必须配合反向代理或公网地址。",
-    "default": "127.0.0.1"
+  "auth_server": {
+    "description": "认证服务器配置",
+    "type": "object",
+    "hint": "一次性登录链接的 HTTP 服务器与有效期配置。",
+    "items": {
+      "auth_listen_host": {
+        "description": "监听地址",
+        "type": "string",
+        "hint": "本机测试用 127.0.0.1；要让外部用户打开链接，必须配合反向代理或公网地址。",
+        "default": "127.0.0.1",
+        "options": ["127.0.0.1", "0.0.0.0"]
+      },
+      "auth_listen_port": {
+        "description": "监听端口",
+        "type": "int",
+        "hint": "0 表示启动时随机选择空闲端口。",
+        "default": 0
+      },
+      "auth_base_url": {
+        "description": "公开根地址",
+        "type": "string",
+        "hint": "留空时用监听地址和实际端口生成本地链接；公网部署填写 HTTPS 反代后的根地址，不要带尾斜杠。",
+        "default": ""
+      },
+      "auth_token_ttl_seconds": {
+        "description": "链接有效期（秒）",
+        "type": "int",
+        "hint": "默认 600 秒；过期后链接失效并通知用户。",
+        "default": 600
+      }
+    }
   },
-  "auth_listen_port": {
-    "description": "一次性登录链接 HTTP server 监听端口",
-    "type": "int",
-    "hint": "0 表示启动时随机选择空闲端口。",
-    "default": 0
+  "login_link": {
+    "description": "登录配置",
+    "type": "object",
+    "hint": "登录链接的输出形式与安全包装策略。",
+    "items": {
+      "login_link_strategy": {
+        "description": "输出形式",
+        "type": "string",
+        "hint": "qrcode=仅QR码图片（推荐）；text=纯文字链接；both=QR码+文字。",
+        "default": "qrcode",
+        "options": ["qrcode", "text", "both"]
+      },
+      "use_docs_link_wrapper": {
+        "description": "腾讯文档链接包装",
+        "type": "bool",
+        "hint": "开启后文字链接会通过 docs.qq.com 中转，绕过 QQ/微信外链拦截。",
+        "default": false
+      },
+      "use_forward_node": {
+        "description": "合并转发包装（仅 aiocqhttp）",
+        "type": "bool",
+        "hint": "开启后登录链接/QR码会通过合并转发消息发送，防止低级群聊机器人抓包。其他平台会忽略此配置。",
+        "default": false
+      }
+    }
   },
-  "auth_base_url": {
-    "description": "登录链接展示给用户的公开根地址",
-    "type": "string",
-    "hint": "留空时用监听地址和实际端口生成本地链接；公网部署填写 HTTPS 反代后的根地址，不要带尾斜杠。",
-    "default": ""
+  "network": {
+    "description": "网络配置",
+    "type": "object",
+    "hint": "请求 UA 与代理配置。",
+    "items": {
+      "user_agent": {
+        "description": "User-Agent",
+        "type": "string",
+        "hint": "留空时使用插件内置默认 User-Agent。",
+        "default": ""
+      },
+      "http_proxy": {
+        "description": "HTTP/HTTPS 代理",
+        "type": "string",
+        "hint": "例如 http://127.0.0.1:7890。留空时遵循进程的 HTTPS_PROXY 环境变量；二者都没有则直连。",
+        "default": ""
+      }
+    }
   },
-  "auth_token_ttl_seconds": {
-    "description": "一次性登录链接有效期（秒）",
-    "type": "int",
-    "hint": "默认 600 秒；过期后链接失效并通知用户。",
-    "default": 600
-  },
-  "cookie_encryption_key": {
-    "description": "持久化 Cookie 的加密 key（任意字符串，留空则明文存储）",
-    "type": "string",
-    "hint": "建议填写至少 32 字符的随机串。留空时 cookie 以明文写入 SQLite，仅适用于本机调试。",
-    "default": ""
-  },
-  "user_agent": {
-    "description": "请求 South Plus 时使用的 User-Agent",
-    "type": "string",
-    "hint": "留空时使用 src/api/constants.py 中的 DEFAULT_USER_AGENT。",
-    "default": ""
-  },
-  "http_proxy": {
-    "description": "请求 South Plus 时使用的 HTTP/HTTPS 代理",
-    "type": "string",
-    "hint": "例如 http://127.0.0.1:7890。留空时遵循进程的 HTTPS_PROXY 环境变量；二者都没有则直连。",
-    "default": ""
+  "auto_checkin": {
+    "description": "签到配置",
+    "type": "object",
+    "hint": "定时自动执行全部绑定账号的日签+周签。",
+    "items": {
+      "auto_checkin_enabled": {
+        "description": "启用自动签到",
+        "type": "bool",
+        "hint": "开启后按设定时间每天自动执行签到。",
+        "default": false
+      },
+      "auto_checkin_time": {
+        "description": "签到时间（HH:mm）",
+        "type": "string",
+        "hint": "每天执行签到的时刻，格式 HH:mm，例如 08:00。",
+        "default": "08:00"
+      },
+      "auto_checkin_concurrency": {
+        "description": "签到并发数",
+        "type": "int",
+        "hint": "默认 3，建议根据站点承受能力和账号数量调整。",
+        "default": 3
+      }
+    }
   }
 }

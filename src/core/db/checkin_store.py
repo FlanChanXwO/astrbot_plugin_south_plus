@@ -1,0 +1,130 @@
+"""``checkin_record`` 表持久化层。
+
+每任务每期一行，保留全部签到历史。用 ``(sp_uid, task_key, period_key)``
+唯一约束保护幂等；``is_already_done`` 搬入 cache 判定逻辑。
+"""
+
+from __future__ import annotations
+
+import sqlite3
+import threading
+from pathlib import Path
+
+from ..datamodels import CheckinRow
+from ._connection import connect as _db_connect
+
+_STALE_SUCCESS_MARKERS = ("未申请", "请赶紧", "去完成")
+
+
+class CheckinStore:
+    def __init__(self, db_path: Path) -> None:
+        self.db_path = db_path
+        self._lock = threading.RLock()
+        self._init_db()
+
+    def _init_db(self) -> None:
+        with self._lock, _db_connect(self.db_path) as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS checkin_record (
+                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    sp_uid       TEXT NOT NULL REFERENCES "user"(sp_uid),
+                    task_key     TEXT NOT NULL,
+                    period_key   TEXT NOT NULL,
+                    status       TEXT NOT NULL,
+                    message      TEXT NOT NULL DEFAULT '',
+                    error        TEXT NOT NULL DEFAULT '',
+                    created_at   TEXT NOT NULL,
+                    UNIQUE(sp_uid, task_key, period_key)
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_checkin_lookup "
+                "ON checkin_record(sp_uid, task_key, period_key)"
+            )
+            conn.commit()
+
+    def record(
+        self,
+        *,
+        sp_uid: str,
+        task_key: str,
+        period_key: str,
+        status: str,
+        message: str = "",
+        error: str = "",
+    ) -> None:
+        """写入一条签到记录。重复写入同名期时按 UNIQUE 约束覆盖。"""
+        stamp = _stamp()
+        with self._lock, _db_connect(self.db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO checkin_record (sp_uid, task_key, period_key, status, message, error, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(sp_uid, task_key, period_key) DO UPDATE SET
+                    status = excluded.status,
+                    message = excluded.message,
+                    error = excluded.error
+                """,
+                (sp_uid, task_key, period_key, status, message, error, stamp),
+            )
+            conn.commit()
+
+    def get_for_period(
+        self, *, sp_uid: str, task_key: str, period_key: str
+    ) -> CheckinRow | None:
+        with self._lock, _db_connect(self.db_path) as conn:
+            row = conn.execute(
+                "SELECT * FROM checkin_record WHERE sp_uid = ? AND task_key = ? AND period_key = ?",
+                (sp_uid, task_key, period_key),
+            ).fetchone()
+        return _row_to_checkin(row) if row else None
+
+    def is_already_done(self, *, sp_uid: str, task_key: str, period_key: str) -> bool:
+        """该期是否已经可信地完成——缓存跳过判断。"""
+        row = self.get_for_period(
+            sp_uid=sp_uid, task_key=task_key, period_key=period_key
+        )
+        if row is None:
+            return False
+        return _cache_is_genuine(row.status, row.message)
+
+    def history(
+        self, *, sp_uid: str, task_key: str, limit: int = 50
+    ) -> list[CheckinRow]:
+        with self._lock, _db_connect(self.db_path) as conn:
+            rows = conn.execute(
+                "SELECT * FROM checkin_record WHERE sp_uid = ? AND task_key = ? "
+                "ORDER BY created_at DESC, id DESC LIMIT ?",
+                (sp_uid, task_key, limit),
+            ).fetchall()
+        return [_row_to_checkin(r) for r in rows]
+
+
+def _cache_is_genuine(status: str, message: str) -> bool:
+    """信任 already_done；信任 success 但剔除误判的 stale 记录。"""
+    if status == "already_done":
+        return True
+    if status != "success":
+        return False
+    return not any(marker in message for marker in _STALE_SUCCESS_MARKERS)
+
+
+def _row_to_checkin(row: sqlite3.Row) -> CheckinRow:
+    return CheckinRow(
+        id=row["id"],
+        sp_uid=row["sp_uid"],
+        task_key=row["task_key"],
+        period_key=row["period_key"],
+        status=row["status"],
+        message=row["message"],
+        error=row["error"],
+        created_at=row["created_at"],
+    )
+
+
+def _stamp() -> str:
+    from ...utils import now_iso
+
+    return now_iso()

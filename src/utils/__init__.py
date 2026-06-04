@@ -10,17 +10,26 @@
 """
 
 from .crypto import decrypt_secret, encrypt_secret
+from .logger import get_plugin_logger, plugin_logger
 from .text import generate_token, mask_secret
-from .timeutil import current_iso_week, current_local_date, expires_at_after, now_iso
+from .timeutil import (
+    current_iso_week,
+    current_iso_week_label,
+    current_local_date,
+    expires_at_after,
+    now_iso,
+)
 from .url import (
     derive_cookie_domains_from_url,
     derive_default_endpoint,
     join_url,
     parse_cookie_domains,
+    wrap_docs_link,
 )
 
 __all__ = [
     "current_iso_week",
+    "current_iso_week_label",
     "current_local_date",
     "decrypt_secret",
     "derive_cookie_domains_from_url",
@@ -28,8 +37,11 @@ __all__ = [
     "encrypt_secret",
     "expires_at_after",
     "generate_token",
+    "get_plugin_logger",
     "join_url",
     "mask_secret",
     "now_iso",
     "parse_cookie_domains",
+    "plugin_logger",
+    "wrap_docs_link",
 ]

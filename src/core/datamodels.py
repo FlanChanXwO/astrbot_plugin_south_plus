@@ -21,87 +21,24 @@ class CredentialSession:
     token: str
     user_key: str
     unified_msg_origin: str
+    platform: str
     expires_at: float
 
 
-@dataclass(slots=True)
-class StoredAccount:
-    """聊天用户在 South Plus 上的一条账号绑定。
-
-    一个聊天用户（``user_key``）可以绑定多个南+账号；每个南+ UID 在数据库
-    里全局唯一（用 ``uid`` 作主键）。``is_active`` 表示该聊天用户当前选中
-    的账号——查询 / 卡片渲染都用激活账号。
-    """
-
-    uid: str
-    user_key: str
-    unified_msg_origin: str
-    username: str
-    cookie: str
-    is_active: bool
-    last_status: str
-    last_message: str
-    last_run_at: str
-    created_at: str
-    updated_at: str
-
-    def to_public_dict(self) -> dict[str, Any]:
-        return {
-            "uid": self.uid,
-            "user_key": self.user_key,
-            "unified_msg_origin": self.unified_msg_origin,
-            "username": self.username,
-            "cookie_masked": mask_secret(self.cookie),
-            "is_active": self.is_active,
-            "last_status": self.last_status,
-            "last_message": self.last_message,
-            "last_run_at": self.last_run_at,
-            "created_at": self.created_at,
-            "updated_at": self.updated_at,
-        }
-
-
 class AddAccountStatus(str, Enum):
-    """``AccountStore.add_or_update`` 的结果分类。"""
+    """``UserStore.add_or_update`` 的结果分类。"""
 
-    CREATED = "created"  # 新增了一条绑定
-    REFRESHED = "refreshed"  # 当前用户已经绑定过同一 UID，仅刷新 cookie / 切回激活
-    OWNED_BY_OTHER = "owned_by_other"  # UID 已被别的聊天用户绑定，操作被拒
+    CREATED = "created"
+    REFRESHED = "refreshed"
+    OWNED_BY_OTHER = "owned_by_other"
 
 
 @dataclass(slots=True)
 class AddAccountResult:
-    """``AccountStore.add_or_update`` 的返回值。
-
-    * ``status == CREATED`` -> ``account`` 是新插入的行。
-    * ``status == REFRESHED`` -> ``account`` 是刚被刷新的行。
-    * ``status == OWNED_BY_OTHER`` -> ``account`` 是占用该 UID 的别人的行，
-      ``cookie`` 字段不会被读取——调用方只用它来给用户回话。
-    """
+    """``UserStore.add_or_update`` 的返回值。"""
 
     status: AddAccountStatus
-    account: StoredAccount
-
-
-@dataclass(slots=True)
-class CheckinRecord:
-    """``checkin_record`` 表的一行——按南+ UID 记录最近一次日 / 周签到状态。
-
-    日签和周签独立，各自记录最近的 ``YYYY-MM-DD`` 日期、状态文案、报错原文。
-    error 字段独立于 message，便于排查；message 给用户看。
-    """
-
-    uid: str
-    last_daily_date: str
-    last_daily_status: str
-    last_daily_message: str
-    last_daily_error: str
-    last_weekly_date: str
-    last_weekly_status: str
-    last_weekly_message: str
-    last_weekly_error: str
-    created_at: str
-    updated_at: str
+    account: UserRow
 
 
 @dataclass(slots=True)
@@ -116,7 +53,95 @@ class AuthServerConfig:
 class PluginConfigSnapshot:
     endpoints: SouthPlusEndpoints
     auth_server: AuthServerConfig
-    cookie_encryption_key: str
     http_proxy: str
+    auto_checkin_enabled: bool
+    auto_checkin_cron: str
+    auto_checkin_concurrency: int
     plugin_data_dir: Path
     database_path: Path
+    login_link_strategy: str = "qrcode"
+    use_docs_link_wrapper: bool = False
+    use_forward_node: bool = False
+
+
+# ---------------------------------------------------------------------------
+# Row 数据类
+# ---------------------------------------------------------------------------
+
+
+@dataclass(slots=True)
+class UserRow:
+    """``user`` 表的一行。"""
+
+    sp_uid: str
+    account: str
+    platform: str
+    cookie: str
+    is_active: bool
+    created_at: str
+    updated_at: str
+
+    def to_public_dict(self) -> dict[str, Any]:
+        return {
+            "sp_uid": self.sp_uid,
+            "account": self.account,
+            "platform": self.platform,
+            "cookie_masked": mask_secret(self.cookie),
+            "is_active": self.is_active,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+
+@dataclass(slots=True)
+class GroupRow:
+    """``group`` 表的一行。"""
+
+    id: int
+    bot_id: str
+    platform: str
+    group_id: str
+    group_name: str
+    last_seen_at: str
+    created_at: str
+    updated_at: str
+
+
+@dataclass(slots=True)
+class UserGroupRow:
+    """``user_group`` 表的一行。"""
+
+    id: int
+    sp_uid: str
+    group_id: int
+    last_seen_at: str
+    created_at: str
+    updated_at: str
+
+
+@dataclass(slots=True)
+class CheckinRow:
+    """``checkin_record`` 表的一行（新：按 task_key 分区 + 全量历史）。"""
+
+    id: int
+    sp_uid: str
+    task_key: str
+    period_key: str
+    status: str
+    message: str
+    error: str
+    created_at: str
+
+
+@dataclass(slots=True)
+class ScheduleRow:
+    """``schedule`` 表的一行。"""
+
+    id: int
+    umo: str
+    task_key: str
+    cron: str
+    params_json: str
+    enabled: bool
+    created_at: str
+    updated_at: str

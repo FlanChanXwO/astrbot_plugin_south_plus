@@ -34,7 +34,7 @@ def test_user_agent_default_falls_back_to_api_constants(tmp_path: Path) -> None:
 
 
 def test_user_agent_can_be_overridden(tmp_path: Path) -> None:
-    manager = _manager({"user_agent": "custom-ua/1.0"}, tmp_path=tmp_path)
+    manager = _manager({"network": {"user_agent": "custom-ua/1.0"}}, tmp_path=tmp_path)
     assert manager.snapshot().endpoints.user_agent == "custom-ua/1.0"
 
 
@@ -48,5 +48,7 @@ def test_auth_server_defaults(tmp_path: Path) -> None:
 
 
 def test_cookie_key_passthrough(tmp_path: Path) -> None:
-    manager = _manager({"cookie_encryption_key": "  secret-key  "}, tmp_path=tmp_path)
+    manager = _manager(
+        {"network": {"cookie_encryption_key": "  secret-key  "}}, tmp_path=tmp_path
+    )
     assert manager.snapshot().cookie_encryption_key == "secret-key"

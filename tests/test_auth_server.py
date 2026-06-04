@@ -11,8 +11,9 @@ import pytest
 from src.southplus.api import (
     LoginRequest,
     LoginResult,
-    SouthPlusClient,
+    SouthPlusLoginApi,
     SouthPlusEndpoints,
+    SouthPlusSession,
 )
 from src.core.auth_server import CredentialFormServer
 from src.core.datamodels import AuthServerConfig, CredentialSession
@@ -33,7 +34,7 @@ def _make_server(
         cookie_domains=("127.0.0.1",),
         user_agent="pytest-southplus",
     )
-    client = SouthPlusClient(endpoints)
+    client = SouthPlusLoginApi(SouthPlusSession(endpoints))
     server = CredentialFormServer(
         config=AuthServerConfig(
             listen_host="127.0.0.1",

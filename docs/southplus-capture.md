@@ -1,6 +1,6 @@
 # South Plus 抓包与逆向流程
 
-> **Capture 日期：2026-06-03**（增补：`/ck.php` 必须带 `nowtime=<毫秒时间戳>` 才返回真验证码；新增社区签到接口 `plugin.php?H_name=tasks` 抓包）
+> **Capture 日期：2026-06-04**（关键字状态机扩容：apply 阶段加入 `"拒离" / "还没超过" / "已经完成" / "已完成"` 等 state-C 别名（覆盖 18 小时冷却拒绝消息）；apply NEEDS_COLLECT 中移除 `"申请["`，避免被冷却消息 `"拒离上次申请[日常]..."` 错配；collect 阶段把 `"未申请任务!"` / `"你已经完成!"` 一并归到 state-C，统一向用户输出"请勿重复签到"，不再判 FAILED——回应"用户在站点手动签到 + 领取后再触发 /spcheckin"的合法场景。）
 >
 > **维护规则（仅适用于本文档）**
 > - 每次重新抓包，无论结果是否变化，都必须更新顶部 "Capture 日期" 为当次抓包的日期 (YYYY-MM-DD)。
@@ -248,42 +248,106 @@ file /tmp/sp_captcha.bin
 
 > 参考实现：[`MeYangGe/SouthPlusQianDao`](https://github.com/MeYangGe/SouthPlusQianDao) 的 `APPLYDAILY.py / COLLECTDAILY.py / APPLYWEEKLY.py / COLLECTWEEKLY.py`。
 
-南+ 的"社区论坛任务"位于 `https://bbs.south-plus.org/plugin.php?H_name-tasks.html`，分两类：
+南+ 的"社区论坛任务"位于 `https://bbs.south-plus.org/plugin.php?H_name-tasks.html`，由"进行中任务 / 已完成任务 / 失败任务"三个 tab 表达状态。可见入口：
+
+| URL | 含义 |
+| --- | --- |
+| `plugin.php?H_name-tasks-actions-newtasks.html.html` | 进行中任务（state B）。也是签到唯一入口的 Referer。 |
+| `plugin.php?H_name-tasks-actions-endtasks.html.html` | 已完成任务（state C）。verify 阶段的语义对应物。 |
+| `plugin.php?H_name-tasks-actions-errotasks.html.html` | 失败任务。落到这里的就不算成功（当前实现不直接访问该页，靠 verify 反推）。 |
 
 | 任务 | cid |
 | --- | --- |
 | 日常签到 | `15` |
 | 周常签到 | `14` |
 
-每个任务都是两步：先**申请**，再**领取奖励**。
+### 任务状态机（phpwind tasks）
 
-| 步骤 | URL params | 含义 |
+| 状态 | 含义 | 所在 tab |
 | --- | --- | --- |
-| apply | `H_name=tasks&action=ajax&actions=job&cid=<cid>&nowtime=<ms>&verify=5af36471` | 申请任务（"进行中任务"） |
-| collect | `H_name=tasks&action=ajax&actions=job2&cid=<cid>&nowtime=<ms>&verify=5af36471` | 领取奖励（"已完成任务"） |
+| **A** | 未申请 | 不在 newtasks / endtasks |
+| **B** | 已申请未领取 | newtasks（进行中） |
+| **C** | 已领取（完成）；常伴 18 小时冷却拒绝 | endtasks（已完成） |
+
+一次完整签到必须把任务从 A 推到 C。**用户在站点手动完成签到**等同于把任务直接推到 C，此时本插件再触发 /spcheckin 会被 phpwind 反映为以下任意一种 state-C 文案，全部按 ALREADY_DONE 处理（向用户提示"请勿重复签到"）：
+
+| 阶段 | 抓包到的 state-C 文案 | 关键字命中 |
+| --- | --- | --- |
+| apply | `请勿重复申请,该任务已完成!` | `请勿重复` / `已完成` |
+| apply | `拒离上次申请[日常]还没超过 18 小时` | `拒离` / `还没超过` |
+| apply | `本周已完成签到任务,请勿重复申请!` | `本周已完成` / `已完成` |
+| collect | `你[日常]已经完成!` | `已经完成` / `已完成` |
+| collect | `请勿重复申请,该任务已完成!` | `请勿重复` / `已完成` |
+| collect | `未申请任务!\t14`（任务已不在 progress 列表的副作用） | `未申请` |
+
+### 三段动作（apply → collect → verify）
+
+| 步骤 | URL params | 期望状态迁移 |
+| --- | --- | --- |
+| apply | `H_name=tasks&action=ajax&actions=job&cid=<cid>&nowtime=<ms>&verify=5af36471` | A → B；B → B；C → C（重入幂等） |
+| collect | `H_name=tasks&action=ajax&actions=job2&cid=<cid>&nowtime=<ms>&verify=5af36471` | B → C；A → 报错"未申请"；C → 报错"请勿重复" |
+| **verify** | 再调一次 `apply` | 期望响应命中 state-C 关键字，证明 endtasks 列表里能查到本任务 |
+
+verify 通过"再次 apply 看响应是否为 state-C"实现，等价于"用户在浏览器里打开 endtasks 页能看到本任务"。这样既满足用户要求"签到必须真的领到完成列表里才算成功"，又不需要额外请求 / 解析 HTML 列表。
 
 GET，cookie 必带 `eb9e6_winduser` 等登录 cookie，UA 与登录抓包同。
 
-**响应**：`<root><![CDATA[ action\tmessage[\textra] ]]></root>`。`action` 用得不多，`message` 是面向用户的中文文案。`extra` 在 collect 阶段可能携带具体奖励额度。
+### 响应解析
 
-**关键字判定**：
+`<root><![CDATA[ action\tmessage[\textra] ]]></root>`。`action` 暂未消费；`message` 是面向用户的中文文案；`extra` 在 collect 阶段可能携带具体奖励额度（拼接到成功消息尾部）。
 
-| 阶段 | 文案 | 处理 |
-| --- | --- | --- |
-| apply | 含 `已完成 / 已领取 / 请勿重复 / 重复 / 已经 / 今天已经 / 本周已经` | `ALREADY_DONE`，**跳过 collect**，节省一次请求 |
-| apply | 含 `完成 / 奖励 / 成功 / 申请 / 领取 / 进行中` | 进入 collect |
-| collect | 含 `请勿重复 / 重复 / 已经 / 已领取 / 今天已经 / 本周已经` | `ALREADY_DONE`（注意不要把"已完成"误判，它在 collect 阶段是字面正常领取） |
-| collect | 含 `完成 / 奖励 / 成功 / 申请 / 领取 / 进行中` | `SUCCESS` |
-| 任意阶段 | 都不命中 / `<root>` parse 失败 / 网络异常 | `FAILED`，原始响应体进 `error` 字段，便于落库排查 |
+### 关键字判定（按状态机）
 
-**verify 字段**：参考仓库观察到是固定 `5af36471`，似乎暂未做严格校验；保留为常量。改版后如发现 401/拒绝，应改为从 tasks 页面 HTML 抓 `verify` token。落地在 `src/southplus/checkin_client.py::DEFAULT_VERIFY`，附 TODO。
+关键字检测顺序固定为：
 
-**nowtime 字段**：`int(time.time() * 1000)`，毫秒整数。参考仓库直接用固定时间戳也能跑——再次证明 verify/nowtime 当前未强校验。
+* **apply**：登录态 → state-B (NEEDS_COLLECT) → state-C (ALREADY_COLLECTED) → 兜底 FAILED；
+* **collect**：登录态 → state-C (ALREADY_DONE) → 刚领取 (SUCCESS) → 兜底 FAILED；
+* **verify**：登录态 → state-C (ALREADY_COLLECTED) 视为 SUCCESS → 兜底 FAILED。
 
-**多调度位置**：
-- `src/southplus/checkin_client.py::DAILY_CID / WEEKLY_CID / ACTION_APPLY / ACTION_COLLECT / DEFAULT_VERIFY`
-- 关键字表：`_SUCCESS_KEYWORDS / _ALREADY_DONE_KEYWORDS / _REPEAT_KEYWORDS`
-- 入口 referer：`TASKS_REFERER`
+所有关键字来自抓包 / 参考仓库观察到的原始中文文案，匹配用 `in`。表与 `src/southplus/api/constants.py` 一一对应。
+
+| 关键字常量 | 阶段 | 命中含义 | 关键字举例 |
+| --- | --- | --- | --- |
+| `NOT_LOGGED_IN_TASK_KEYWORDS` | apply / collect / verify | Cookie 已失效，整体 FAILED 并提示重新 /splogin | `还没有登录`、`暂时不能使用此功能` |
+| `APPLY_NEEDS_COLLECT_KEYWORDS` | apply | state-B：继续走 collect + verify | `请赶紧`、`去完成`、`申请成功`、`进行中` |
+| `APPLY_ALREADY_COLLECTED_KEYWORDS` | apply / verify | state-C：apply 阶段命中 → ALREADY_DONE 短路；verify 阶段命中 → SUCCESS 确认 | `请勿重复`、`已领取`、`已经完成`、`已完成`、`拒离`、`还没超过`、`本周已完成`、`今天已完成` |
+| `COLLECT_ALREADY_DONE_KEYWORDS` | collect | state-C：用户已外部完成 / cooldown / 任务从 progress 列表消失 → ALREADY_DONE，输出"请勿重复签到" | `请勿重复`、`已领取`、`已经完成`、`已完成`、`未申请`、`拒离`、`还没超过` |
+| `COLLECT_SUCCESS_KEYWORDS` | collect | state-B → C：刚领取成功 | `获得`、`奖励`、`成功`、`领取` |
+
+**关键陷阱 / 设计决定**：
+
+* 不要把 `"申请["` 放进 `APPLY_NEEDS_COLLECT_KEYWORDS`——冷却消息 `"拒离上次申请[日常]还没超过 18 小时"` 也含此串，会把 state-C 错配为 state-B。state-B 文案 `"申请[日常]任务完成,请赶紧去完成任务吧!"` 已被 `"请赶紧 / 去完成"` 覆盖，不需要 `"申请["`。
+* 不要把 `"完成"` 放进 `COLLECT_SUCCESS_KEYWORDS`——state-C 文案 `"你[日常]已经完成!"` 同样含 `"完成"`。collect 阶段必须 ALREADY_DONE 先于 SUCCESS 检查。
+* `COLLECT_REQUIRES_APPLY_KEYWORDS` 已被废弃为空 tuple。phpwind 在 state-C 场景同样会返回 `"未申请任务!"`（任务已不在 progress 列表的副作用），按 `FAILED` 处理会误伤"用户已手动签到"的合法用例；现统一归到 `COLLECT_ALREADY_DONE_KEYWORDS`。
+* ALREADY_DONE 的用户可见消息固定为 `"<label>：已签到，请勿重复签到。"`——不向用户暴露站点原文，避免 `"未申请任务!"` 之类的反直觉文案直达用户。
+* verify 必须命中 `APPLY_ALREADY_COLLECTED_KEYWORDS`；如果仍返回 state-B 文案，无论 collect 自报多成功都判 FAILED，并把 collect / verify 两段原文一起塞 `error`。
+
+### 失败兜底
+
+| 触发 | 落到 |
+| --- | --- |
+| 任意阶段都不命中关键字 | `FAILED`，message 包含阶段名 + 站点原文，error 保留 raw_body |
+| `<root>` parse 失败 | `FAILED`（视为 message=raw 文本，走兜底分支） |
+| 网络异常 | `FAILED`，message 提示"网络错误"，error 保留 `httpx` repr |
+| Cookie 失效 | `FAILED`，message 提示"Cookie 已失效，请重新 /splogin" |
+
+### verify 字段 / nowtime 字段
+
+* `verify=5af36471`：参考仓库观察到是固定值，似乎暂未做严格校验；保留为常量 `DEFAULT_CHECKIN_VERIFY`。若改版后出现 401 / 拒绝，应改为预先 GET tasks 页面解析 token。已在 `src/southplus/api/constants.py` 上方挂 TODO。
+* `nowtime`：`int(time.time() * 1000)`，毫秒整数。参考仓库直接用固定时间戳也能跑——证明 nowtime 当前未强校验。
+
+### 落点
+
+| 抓包结论 | 落点 |
+| --- | --- |
+| 任务 URL / Referer | `src/southplus/api/constants.py::TASKS_NEW_URL / TASKS_END_URL / TASKS_ERRO_URL / TASKS_REFERER` |
+| 任务 ID | `src/southplus/api/constants.py::DAILY_CID / WEEKLY_CID` |
+| 动作名 | `src/southplus/api/constants.py::ACTION_APPLY / ACTION_COLLECT` |
+| verify 常量 | `src/southplus/api/constants.py::DEFAULT_CHECKIN_VERIFY` |
+| 状态机关键字 | `src/southplus/api/constants.py::*_KEYWORDS`（见上表） |
+| apply → collect → verify 主流程 | `src/southplus/checkin_service.py::run_checkin` |
+| 单任务安全包装（吃异常） | `src/southplus/checkin_service.py::_safe_run` |
+| 日 + 周门面 | `src/southplus/checkin_service.py::CheckinService` |
 
 ## 验证抓包结果是否仍然有效
 
