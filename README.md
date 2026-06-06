@@ -65,7 +65,6 @@ git clone https://github.com/FlanChanXwO/astrbot_plugin_south_plus.git
 |------|------|
 | [开发与维护](docs/dev/maintenance.md) | 包边界、安全边界、文档纪律、迁移规则 |
 | [项目概览](docs/project/README.md) | 能力说明与架构分层 |
-| [South Plus 抓包](docs/dev/southplus-capture.md) | 逆向记录与 Capture 日期约束 |
 | [安全说明](docs/dev/security.md) | Cookie 存储、密钥、边界 |
 
 ## 关键配置
@@ -77,9 +76,7 @@ git clone https://github.com/FlanChanXwO/astrbot_plugin_south_plus.git
 | `auth_base_url` | 空 | 公网展示根地址，公网部署必须填 HTTPS 反代后的根。 |
 | `auth_token_ttl_seconds` | `600` | 登录链接有效期（秒）。 |
 | `cookie_encryption_key` | 空 | Cookie 加密 key；留空时明文存储（仅推荐本机调试）。 |
-| `user_agent` | 空 | 留空时使用内置 UA；反爬升级时可覆盖。 |
-
-> South Plus 站点本身的 URL、cookie 域、表单字段等抓包结论硬编码在 `src/southplus/api/constants.py`，不暴露给 Dashboard——改 South Plus 走"重新抓包 → 更新 `docs/dev/southplus-capture.md` Capture 日期 → 改 `src/southplus/`"流程。
+| `user_agent` | 空 | 留空时使用内置 UA；站点访问异常时可覆盖。 |
 
 ## 临时登录链接
 
