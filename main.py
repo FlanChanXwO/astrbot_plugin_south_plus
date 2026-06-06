@@ -444,6 +444,25 @@ class SouthPlusPlugin(Star):
         else:
             yield event.plain_result("当前会话未订阅签到结果。")
 
+    @filter.command("spcheckinallsub", alias={"sp全局签到订阅"})
+    @filter.permission_type(PermissionType.ADMIN)
+    async def sp_checkin_all_sub_toggle(self, event: AstrMessageEvent):
+        """管理员：切换当前会话的全部账号签到结果推送订阅。"""
+        umo = event.unified_msg_origin
+        params = {"mode": "all"}
+        task_key = "sp.checkin.all"
+        if self.scheduler.is_subscribed(umo, task_key, params):
+            self.scheduler.unsubscribe(umo, task_key, params)
+            yield event.plain_result("已取消本会话的全部账号签到结果推送。")
+            return
+        self.scheduler.subscribe(
+            umo,
+            task_key=task_key,
+            cron=self.config_snapshot.auto_checkin_cron,
+            params=params,
+        )
+        yield event.plain_result("已订阅本会话的全部账号签到结果推送。")
+
     @filter.command("spallcheckin", alias={"sp全体签到"})
     @filter.permission_type(PermissionType.ADMIN)
     async def sp_all_checkin(self, event: AstrMessageEvent):
@@ -453,7 +472,7 @@ class SouthPlusPlugin(Star):
 
     @filter.command("spautocheckin", alias={"sp自动签到"})
     async def sp_set_auto_checkin(self, event: AstrMessageEvent):
-        """开关当前激活账号的自动签到。用法：/spautocheckin on 或 off"""
+        """切换当前激活账号的自动签到开关。"""
         account = event.get_sender_id()
         platform = event.get_platform_name()
         user = self.store.get_active(account, platform)
@@ -461,26 +480,9 @@ class SouthPlusPlugin(Star):
             yield event.plain_result("当前未绑定南+ 账号，请先用 /splogin 登录。")
             return
 
-        raw_args = event.message_str.strip().split()
-        if len(raw_args) < 2:
-            status = "已开启" if user.auto_checkin else "已关闭"
-            yield event.plain_result(
-                f"当前账号（{user.sp_uid}）自动签到：{status}\n"
-                "使用 /spautocheckin on 或 off 切换。"
-            )
-            return
-
-        flag = raw_args[1].lower()
-        if flag in ("on", "1", "true", "开启"):
-            enabled = True
-        elif flag in ("off", "0", "false", "关闭"):
-            enabled = False
-        else:
-            yield event.plain_result("参数无效，请使用 on 或 off。")
-            return
-
+        enabled = not user.auto_checkin
         self.store.set_auto_checkin(user.sp_uid, enabled)
-        status = "已开启" if enabled else "已关闭"
+        status = "开启" if enabled else "关闭"
         yield event.plain_result(f"账号 {user.sp_uid} 的自动签到已{status}。")
 
     # ------------------------------------------------------------------

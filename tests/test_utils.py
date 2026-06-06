@@ -111,7 +111,7 @@ def test_format_add_account_result_created_with_hint() -> None:
         auto_checkin_hint=True,
     )
     assert "登录成功：用户名：alice，id：10001" in text
-    assert "/spautocheckin off" in text
+    assert "/spautocheckin 切换当前账号签到" in text
 
 
 def test_format_add_account_result_refreshed_and_owned_by_other() -> None:

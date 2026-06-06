@@ -10,8 +10,9 @@ South Plus 凭证与任务自动化 AstrBot 插件。
 - `/spuidlist` / `/spswitch` / `/spdelete` — 多 UID 绑定、切换、删除。
 - `/spbindcookie` — 直接用 Cookie 绑定（拉 profile 取 UID 入库）。
 - `/spstatus` — 查看当前激活账号状态。
-- `/spautocheckin [on/off]` — 查看或切换当前激活账号的自动签到开关。
+- `/spautocheckin` — 切换当前激活账号的自动签到开关。
 - `/spsubcheckin` / `/spunsubcheckin` — 订阅/取消订阅当前会话的**当前账号**签到结果推送。
+- `/spcheckinallsub`（别名 `/sp全局签到订阅`）— 管理员订阅或取消当前会话的**全部账号**签到结果推送。
 - `/spallcheckin` — 管理员立即执行全部绑定账号签到。
 - `/spcleanup`（别名 `/sp清理`）— 管理员清理退群或非好友用户的绑定数据。
 - Dashboard Plugin Pages — 管理员管理账号、群组、调度任务、用户-群关系与签到历史。

@@ -21,9 +21,7 @@ def format_add_account_result(
     if result.status == "created":
         text = f"登录成功：用户名：{username}，id：{uid}"
         if auto_checkin_hint:
-            text += (
-                "\n已在后台开启自动社区签到（可用 /spautocheckin off 关闭当前账号签到）"
-            )
+            text += "\n已在后台开启自动社区签到（可用 /spautocheckin 切换当前账号签到）"
         return text
     if result.status == "refreshed":
         return (

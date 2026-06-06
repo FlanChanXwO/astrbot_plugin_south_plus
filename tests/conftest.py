@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import sys
 import threading
+import types
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from http import HTTPStatus
+from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs
 
@@ -15,6 +18,108 @@ _MIN_PNG = bytes.fromhex(
     "0000000d49444154789c63000100000005000100"
     "0d0a2db40000000049454e44ae426082"
 )
+
+
+def _install_astrbot_stub() -> None:
+    """测试环境没有 AstrBot SDK 时，提供插件测试所需的最小接口。"""
+    if "astrbot.api.event" in sys.modules:
+        return
+
+    astrbot = types.ModuleType("astrbot")
+    api = types.ModuleType("astrbot.api")
+    core = types.ModuleType("astrbot.core")
+    core_utils = types.ModuleType("astrbot.core.utils")
+    astrbot_path = types.ModuleType("astrbot.core.utils.astrbot_path")
+    html_renderer = types.ModuleType("astrbot.core.html_renderer")
+    event = types.ModuleType("astrbot.api.event")
+    event_filter = types.ModuleType("astrbot.api.event.filter")
+    message_components = types.ModuleType("astrbot.api.message_components")
+    star = types.ModuleType("astrbot.api.star")
+
+    class _PermissionType:
+        ADMIN = "admin"
+
+    class _MessageChain:
+        def __init__(self) -> None:
+            self.text = ""
+
+        def message(self, text: str):
+            self.text = text
+            return self
+
+    class _Filter:
+        @staticmethod
+        def command(name: str, *, alias: set[str] | None = None):
+            def decorator(func):
+                func.__southplus_command__ = {
+                    "name": name,
+                    "alias": set(alias or set()),
+                }
+                return func
+
+            return decorator
+
+        @staticmethod
+        def permission_type(permission):
+            def decorator(func):
+                func.__southplus_permission__ = permission
+                return func
+
+            return decorator
+
+    class _Image:
+        @staticmethod
+        def fromFileSystem(path: str):
+            return path
+
+    class _Node:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+
+    class _Plain:
+        def __init__(self, text: str) -> None:
+            self.text = text
+
+    class _Star:
+        def __init__(self, context) -> None:
+            self.context = context
+
+    async def _render_custom_template(*args, **kwargs) -> bytes:
+        del args, kwargs
+        return b""
+
+    def _get_astrbot_data_path() -> str:
+        return str(Path.cwd() / ".test_astrbot_data")
+
+    api.AstrBotConfig = dict
+    core.html_renderer = html_renderer
+    core.utils = core_utils
+    core_utils.astrbot_path = astrbot_path
+    astrbot_path.get_astrbot_data_path = _get_astrbot_data_path
+    html_renderer.render_custom_template = _render_custom_template
+    event.AstrMessageEvent = object
+    event.MessageChain = _MessageChain
+    event.filter = _Filter
+    event_filter.PermissionType = _PermissionType
+    message_components.Image = _Image
+    message_components.Node = _Node
+    message_components.Plain = _Plain
+    star.Context = object
+    star.Star = _Star
+
+    sys.modules["astrbot"] = astrbot
+    sys.modules["astrbot.api"] = api
+    sys.modules["astrbot.core"] = core
+    sys.modules["astrbot.core.utils"] = core_utils
+    sys.modules["astrbot.core.utils.astrbot_path"] = astrbot_path
+    sys.modules["astrbot.core.html_renderer"] = html_renderer
+    sys.modules["astrbot.api.event"] = event
+    sys.modules["astrbot.api.event.filter"] = event_filter
+    sys.modules["astrbot.api.message_components"] = message_components
+    sys.modules["astrbot.api.star"] = star
+
+
+_install_astrbot_stub()
 
 
 @dataclass
