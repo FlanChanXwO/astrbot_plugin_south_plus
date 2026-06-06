@@ -80,6 +80,7 @@ class UserRow:
     is_active: bool
     created_at: str
     updated_at: str
+    auto_checkin: bool = True
 
     def to_public_dict(self) -> dict[str, Any]:
         return {
@@ -88,6 +89,7 @@ class UserRow:
             "platform": self.platform,
             "cookie_masked": mask_secret(self.cookie),
             "is_active": self.is_active,
+            "auto_checkin": self.auto_checkin,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -143,5 +145,16 @@ class ScheduleRow:
     cron: str
     params_json: str
     enabled: bool
+    created_at: str
+    updated_at: str
+
+
+@dataclass(slots=True)
+class CheckinSessionExclusionRow:
+    """``checkin_session_exclusion`` 表的一行。"""
+
+    id: int
+    umo: str
+    sp_uid: str
     created_at: str
     updated_at: str

@@ -101,6 +101,40 @@ class CheckinStore:
             ).fetchall()
         return [_row_to_checkin(r) for r in rows]
 
+    def list_recent(
+        self,
+        *,
+        sp_uid: str = "",
+        task_key: str = "",
+        status: str = "",
+        period_key: str = "",
+        limit: int = 100,
+    ) -> list[CheckinRow]:
+        """按可选条件列出最近签到历史，供 Dashboard 排障查看。"""
+        clauses: list[str] = []
+        params: list[str | int] = []
+        if sp_uid:
+            clauses.append("sp_uid = ?")
+            params.append(sp_uid)
+        if task_key:
+            clauses.append("task_key = ?")
+            params.append(task_key)
+        if status:
+            clauses.append("status = ?")
+            params.append(status)
+        if period_key:
+            clauses.append("period_key = ?")
+            params.append(period_key)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        params.append(max(1, int(limit or 100)))
+        with self._lock, _db_connect(self.db_path) as conn:
+            rows = conn.execute(
+                f"SELECT * FROM checkin_record {where} "
+                "ORDER BY created_at DESC, id DESC LIMIT ?",
+                tuple(params),
+            ).fetchall()
+        return [_row_to_checkin(r) for r in rows]
+
 
 def _cache_is_genuine(status: str, message: str) -> bool:
     """信任 already_done；信任 success 但剔除误判的 stale 记录。"""

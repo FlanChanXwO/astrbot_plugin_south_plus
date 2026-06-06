@@ -1,7 +1,7 @@
 name: astrbot_plugin_south_plus
-display_name: South Plus 自动任务
-desc: South Plus 多用户凭证与自动任务管理插件。
+display_name: SouthPlus
+desc: SouthPlus 插件，支持社区签到和账号信息查询，且可开启定时签到
 version: 1.0.0
-author: flanchan
+author: FlanChanXwO
 repo: https://github.com/FlanChanXwO/astrbot_plugin_south_plus
 astrbot_version: ">=4.24.0"

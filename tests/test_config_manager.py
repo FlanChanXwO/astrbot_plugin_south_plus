@@ -47,8 +47,9 @@ def test_auth_server_defaults(tmp_path: Path) -> None:
     assert auth.base_url == ""
 
 
-def test_cookie_key_passthrough(tmp_path: Path) -> None:
+def test_checkin_time_conversion(tmp_path: Path) -> None:
+    """验证 HH:mm 被正确转换为 cron 表达式。"""
     manager = _manager(
-        {"network": {"cookie_encryption_key": "  secret-key  "}}, tmp_path=tmp_path
+        {"auto_checkin": {"auto_checkin_time": "09:30"}}, tmp_path=tmp_path
     )
-    assert manager.snapshot().cookie_encryption_key == "secret-key"
+    assert manager.snapshot().auto_checkin_cron == "30 9 * * *"

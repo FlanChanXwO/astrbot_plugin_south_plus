@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>South Plus 登录</title>
+  <style>
+    :root {
+      --sp-text: #1f2937;
+      --sp-muted: #5b6b7c;
+      --sp-border: #cfd8e3;
+      --sp-bg: #ffffff;
+    }
+    body.season-spring {
+      --sp-primary: #e87a92;
+      --sp-primary-dark: #c45d75;
+      --sp-primary-soft: #f0b8c8;
+      --sp-primary-light: #fef0f5;
+      --sp-gradient: linear-gradient(180deg, #fef0f5 0%, #f5fff0 60%);
+      --sp-shadow: rgba(232, 122, 146, 0.12);
+      --sp-shadow-light: rgba(232, 122, 146, 0.18);
+    }
+    body.season-summer {
+      --sp-primary: #4a9eff;
+      --sp-primary-dark: #2f7fd9;
+      --sp-primary-soft: #8fc8ff;
+      --sp-primary-light: #e8f4ff;
+      --sp-gradient: linear-gradient(180deg, #e8f4ff 0%, #ffffff 60%);
+      --sp-shadow: rgba(74, 158, 255, 0.12);
+      --sp-shadow-light: rgba(74, 158, 255, 0.18);
+    }
+    body.season-fall {
+      --sp-primary: #e88d4a;
+      --sp-primary-dark: #c46e2f;
+      --sp-primary-soft: #f0c8a0;
+      --sp-primary-light: #fef5e8;
+      --sp-gradient: linear-gradient(180deg, #fef5e8 0%, #fefef5 60%);
+      --sp-shadow: rgba(232, 141, 74, 0.12);
+      --sp-shadow-light: rgba(232, 141, 74, 0.18);
+    }
+    body.season-winter {
+      --sp-primary: #7ba9d4;
+      --sp-primary-dark: #5a8bb5;
+      --sp-primary-soft: #b0d0e8;
+      --sp-primary-light: #eef5fa;
+      --sp-gradient: linear-gradient(180deg, #eef5fa 0%, #ffffff 60%);
+      --sp-shadow: rgba(123, 169, 212, 0.12);
+      --sp-shadow-light: rgba(123, 169, 212, 0.18);
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      margin: 0;
+      padding: 2rem 1rem;
+      color: var(--sp-text);
+      background: var(--sp-gradient);
+      min-height: 100vh;
+    }
+    main {
+      max-width: 480px;
+      margin: 0 auto;
+      background: var(--sp-bg);
+      border: 1px solid var(--sp-border);
+      border-radius: 14px;
+      padding: 24px 28px 28px;
+      box-shadow: 0 6px 20px var(--sp-shadow);
+    }
+    .pw-wrapper {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+    .pw-wrapper input { width: 100%; padding-right: 44px; }
+    .pw-toggle {
+      position: absolute;
+      right: 4px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: none;
+      border: none;
+      padding: 8px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--sp-muted);
+      min-height: unset;
+      border-radius: 6px;
+      transition: background 0.15s, color 0.15s;
+    }
+    .pw-toggle:hover { background: var(--sp-primary-light); color: var(--sp-primary-dark); }
+    .pw-toggle svg { display: block; }
+    .brand {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 18px;
+    }
+    .brand img {
+      max-width: 240px;
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+    h1 {
+      font-size: 1.25rem;
+      margin: 4px 0 0;
+      color: var(--sp-primary-dark);
+      text-align: center;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+    }
+    form { display: grid; gap: 14px; margin-top: 8px; }
+    label {
+      display: grid;
+      gap: 6px;
+      font-weight: 600;
+      color: var(--sp-text);
+      font-size: 0.95rem;
+    }
+    .field-group { display: grid; gap: 6px; }
+    .field-label {
+      font-weight: 600;
+      font-size: 0.95rem;
+      color: var(--sp-text);
+    }
+    input, button {
+      font: inherit;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--sp-border);
+      background: #fff;
+      color: var(--sp-text);
+      transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+    }
+    input:focus {
+      outline: none;
+      border-color: var(--sp-primary);
+      box-shadow: 0 0 0 3px var(--sp-shadow-light);
+    }
+    button { cursor: pointer; }
+    button.primary {
+      background: var(--sp-primary);
+      color: #fff;
+      border-color: var(--sp-primary);
+      font-weight: 600;
+    }
+    button.primary:hover:not(:disabled) {
+      background: var(--sp-primary-dark);
+      border-color: var(--sp-primary-dark);
+    }
+    button.primary:disabled { opacity: 0.6; cursor: not-allowed; }
+    button.secondary {
+      background: #fff;
+      color: var(--sp-primary-dark);
+      border-color: var(--sp-primary-soft);
+    }
+    button.secondary:hover:not(:disabled) { background: var(--sp-primary-light); }
+    button.secondary:disabled { opacity: 0.6; cursor: not-allowed; }
+    .captcha {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      align-items: end;
+    }
+    .captcha img {
+      height: 60px;
+      border: 1px solid var(--sp-border);
+      border-radius: 8px;
+      background: var(--sp-primary-light);
+      cursor: pointer;
+    }
+    .hint { color: var(--sp-muted); line-height: 1.6; font-size: 0.9rem; margin: 0; }
+    .actions { display: flex; gap: 10px; }
+    .actions button { flex: 1; }
+    .field-msg {
+      display: none;
+      font-size: 0.82rem;
+      line-height: 1.4;
+    }
+    .field-msg.error { display: block; color: #dc2626; }
+    .success-card {
+      display: none;
+      text-align: center;
+      padding: 10px 0;
+    }
+    .success-card .success-icon {
+      width: 72px;
+      height: 72px;
+      margin: 0 auto 16px;
+      background: #16a34a;
+      color: #fff;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2.2rem;
+      font-weight: 700;
+    }
+    .success-card .success-title {
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: var(--sp-text);
+      margin: 0 0 8px;
+    }
+    .success-card .success-detail {
+      font-size: 0.9rem;
+      color: var(--sp-muted);
+      margin: 0 0 20px;
+      line-height: 1.6;
+    }
+    .close-btn {
+      display: block;
+      width: 100%;
+      padding: 10px 12px;
+      font: inherit;
+      font-size: 0.95rem;
+      border-radius: 8px;
+      border: 1px solid var(--sp-primary-soft);
+      background: #fff;
+      color: var(--sp-primary-dark);
+      cursor: pointer;
+      transition: background 0.15s;
+      min-height: 44px;
+    }
+    .close-btn:hover { background: var(--sp-primary-light); }
+    .countdown {
+      font-size: 0.85rem;
+      color: var(--sp-primary);
+      margin: 4px 0 0;
+      font-weight: 600;
+    }
+    .redirect-link {
+      display: inline-block;
+      margin-top: 16px;
+      font-size: 0.85rem;
+      color: var(--sp-primary);
+      text-decoration: none;
+    }
+    .redirect-link:hover { text-decoration: underline; }
+    @media (max-width: 520px) {
+      body { padding: 0.75rem 0.5rem; }
+      main { padding: 16px 16px 20px; border-radius: 12px; box-shadow: none; }
+      .brand img { max-width: 180px; }
+      h1 { font-size: 1.1rem; }
+      input, button { font-size: 16px; }
+      .captcha { grid-template-columns: 1fr; }
+      .captcha img { height: 80px; width: 100%; object-fit: contain; }
+      .actions { flex-direction: column; }
+      .actions button { width: 100%; }
+    }
+    @media (max-width: 360px) {
+      .brand img { max-width: 150px; }
+      main { padding: 12px 12px 16px; }
+      h1 { font-size: 1rem; }
+    }
+  </style>
+</head>
+<body class="season-$season">
+  <main>
+    <div class="brand">
+      <img src="/assets/$logo_filename" alt="South Plus">
+    </div>
+    <form id="login-form" autocomplete="off">
+      <label>
+        账号
+        <input name="username" id="input-username" required>
+        <span class="field-msg" id="msg-username"></span>
+      </label>
+      <label>
+        密码
+        <div class="pw-wrapper">
+          <input name="password" type="password" id="input-password" required>
+          <button type="button" class="pw-toggle" id="pw-toggle-btn" aria-label="切换密码可见">
+            <svg id="pw-eye" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            <svg id="pw-eye-off" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+          </button>
+        </div>
+        <span class="field-msg" id="msg-password"></span>
+      </label>
+      <div class="field-group">
+        <div class="field-label">认证码</div>
+        <div class="captcha">
+          <input name="captcha" id="input-captcha" required>
+          <img id="captcha-img" alt="captcha" src="/captcha/$token">
+        </div>
+        <span class="field-msg" id="msg-captcha"></span>
+      </div>
+      <div class="actions">
+        <button class="primary" type="submit" id="submit-btn">提交</button>
+        <button class="secondary" type="button" id="cancel-btn">取消</button>
+      </div>
+    </form>
+    <div id="success-card" class="success-card">
+      <div class="success-icon">✓</div>
+      <p class="success-title">登录成功</p>
+      <p class="success-detail">即将跳转到项目主页...</p>
+      <p class="countdown" id="countdown-text">3 秒后自动跳转</p>
+      <a class="redirect-link" id="redirect-link" href="https://github.com/FlanChanXwO/astrbot_plugin_south_plus">如果页面没有自动跳转，请点击这里</a>
+    </div>
+  </main>
+  <script>
+    (function() {
+      var token = "$token";
+      var form = document.getElementById("login-form");
+      var successCard = document.getElementById("success-card");
+      var img = document.getElementById("captcha-img");
+      var submitBtn = document.getElementById("submit-btn");
+      var cancelBtn = document.getElementById("cancel-btn");
+      var usernameInput = document.getElementById("input-username");
+      var passwordInput = document.getElementById("input-password");
+      var captchaInput = document.getElementById("input-captcha");
+      var msgUsername = document.getElementById("msg-username");
+      var msgPassword = document.getElementById("msg-password");
+      var msgCaptcha = document.getElementById("msg-captcha");
+
+      function clearFieldMessages() {
+        [msgUsername, msgPassword, msgCaptcha].forEach(function(el) {
+          el.className = "field-msg";
+          el.textContent = "";
+        });
+      }
+
+      function showFieldError(el, text) {
+        el.className = "field-msg error";
+        el.textContent = text;
+      }
+
+      function refreshCaptcha() {
+        img.src = "/captcha/" + encodeURIComponent(token) + "?_=" + Date.now();
+      }
+
+      img.addEventListener("click", refreshCaptcha);
+
+      // Password show/hide toggle
+      var pwInput = document.getElementById("input-password");
+      var pwToggle = document.getElementById("pw-toggle-btn");
+      var pwEye = document.getElementById("pw-eye");
+      var pwEyeOff = document.getElementById("pw-eye-off");
+      pwToggle.addEventListener("click", function() {
+        var show = pwInput.type === "password";
+        pwInput.type = show ? "text" : "password";
+        pwEye.style.display = show ? "none" : "";
+        pwEyeOff.style.display = show ? "" : "none";
+      });
+
+      form.addEventListener("submit", async function(event) {
+        event.preventDefault();
+        clearFieldMessages();
+
+        var username = (usernameInput.value || "").trim();
+        var password = (passwordInput.value || "").trim();
+        var captcha = (captchaInput.value || "").trim();
+
+        var hasEmpty = false;
+        if (!username) { showFieldError(msgUsername, "请输入账号"); hasEmpty = true; }
+        if (!password) { showFieldError(msgPassword, "请输入密码"); hasEmpty = true; }
+        if (!captcha) { showFieldError(msgCaptcha, "请输入认证码"); hasEmpty = true; }
+        if (hasEmpty) return;
+
+        submitBtn.disabled = true;
+        try {
+          var response = await fetch("/login/" + encodeURIComponent(token), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username: username, password: password, captcha: captcha }),
+          });
+          var payload = await response.json();
+          if (payload.ok) {
+            form.style.display = "none";
+            successCard.style.display = "block";
+            startCountdown();
+          } else {
+            showFieldError(msgCaptcha, payload.message || "登录失败");
+            submitBtn.disabled = false;
+            refreshCaptcha();
+          }
+        } catch (err) {
+          submitBtn.disabled = false;
+          showFieldError(msgCaptcha, "网络异常：" + err.message);
+        }
+      });
+
+      cancelBtn.addEventListener("click", async function() {
+        cancelBtn.disabled = true;
+        clearFieldMessages();
+        try {
+          var response = await fetch("/cancel/" + encodeURIComponent(token), { method: "POST" });
+          var payload = await response.json();
+          if (payload.ok) {
+            form.style.display = "none";
+            successCard.querySelector(".success-icon").style.background = "#6b7280";
+            successCard.querySelector(".success-title").textContent = "已取消";
+            successCard.querySelector(".success-detail").textContent = payload.message || "已取消登录。";
+            successCard.style.display = "block";
+          } else {
+            cancelBtn.disabled = false;
+          }
+        } catch (err) {
+          cancelBtn.disabled = false;
+          showFieldError(msgCaptcha, "网络异常：" + err.message);
+        }
+      });
+
+      // --- Countdown redirect ---
+      var GITHUB_URL = "https://github.com/FlanChanXwO/astrbot_plugin_south_plus";
+      var countdownEl = document.getElementById("countdown-text");
+      var seconds = 3;
+      function startCountdown() {
+        countdownEl.textContent = seconds + " 秒后自动跳转";
+        var timer = setInterval(function() {
+          seconds--;
+          if (seconds > 0) {
+            countdownEl.textContent = seconds + " 秒后自动跳转";
+          } else {
+            clearInterval(timer);
+            countdownEl.textContent = "正在跳转...";
+            window.location.href = GITHUB_URL;
+          }
+        }, 1000);
+      }
+    })();
+  </script>
+</body>
+</html>

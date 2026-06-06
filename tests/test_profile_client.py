@@ -251,6 +251,28 @@ def test_parse_avatar_falls_back_to_logo_when_missing() -> None:
     assert "logo" in profile.avatar_url
 
 
+def test_parse_avatar_finds_img_pic_class() -> None:
+    """实际 profile 页面的头像标记：<img class=\"pic\" src=\"...\">。"""
+    body = (
+        "<html><body><p>个人资料</p><p>数字ID: 42</p>"
+        '<td class="tac"><img class="pic" src="images/face/9.png" /></td>'
+        "</body></html>"
+    )
+    profile = parse_profile_html(body)
+    assert profile.avatar_url == "https://bbs.south-plus.org/images/face/9.png"
+
+
+def test_parse_avatar_portrait_wrapper() -> None:
+    """#u-portrait 内含 img（用户报告的另一种可能结构）。"""
+    body = (
+        "<html><body><p>个人资料</p><p>数字ID: 42</p>"
+        '<div id="u-portrait"><img src="images/face/portrait.jpg" /></div>'
+        "</body></html>"
+    )
+    profile = parse_profile_html(body)
+    assert profile.avatar_url == "https://bbs.south-plus.org/images/face/portrait.jpg"
+
+
 # --- username 用 UID 邻接锚定 -----------------------------------------------
 
 

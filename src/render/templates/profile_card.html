@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", sans-serif;
+      padding: 20px;
+      background: var(--bg-grad);
+      display: flex;
+      justify-content: center;
+    }
+
+    /* ── 季节配色 ── */
+    body.spring {
+      --accent: #e87a92;
+      --accent-dim: rgba(232,122,146,0.15);
+      --bg-grad: linear-gradient(180deg, #fef0f5 0%, #f5fff0 100%);
+    }
+    body.summer {
+      --accent: #4a9eff;
+      --accent-dim: rgba(74,158,255,0.15);
+      --bg-grad: linear-gradient(180deg, #e8f4ff 0%, #ffffff 100%);
+    }
+    body.fall {
+      --accent: #e88d4a;
+      --accent-dim: rgba(232,141,74,0.15);
+      --bg-grad: linear-gradient(180deg, #fef5e8 0%, #fefef5 100%);
+    }
+    body.winter {
+      --accent: #7ba9d4;
+      --accent-dim: rgba(123,169,212,0.15);
+      --bg-grad: linear-gradient(180deg, #eef5fa 0%, #ffffff 100%);
+    }
+
+    .card {
+      position: relative;
+      width: 380px;
+      background: #fff;
+      border-radius: 16px;
+      border: 1px solid var(--accent-dim);
+      box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+      padding: 28px 24px 24px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0;
+    }
+
+    /* ── Logo 水印 ── */
+    .logo-watermark {
+      position: absolute;
+      top: 14px;
+      right: 14px;
+      width: 28px;
+      height: 28px;
+      object-fit: contain;
+      opacity: 0.18;
+    }
+
+    /* ── 头像 ── */
+    .avatar-wrap {
+      width: 100px;
+      height: 100px;
+      border-radius: 50%;
+      overflow: hidden;
+      border: 3px solid var(--accent);
+      box-shadow: 0 0 0 4px var(--accent-dim);
+      margin-bottom: 14px;
+      flex-shrink: 0;
+    }
+    .avatar-wrap img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .avatar-placeholder {
+      width: 100%;
+      height: 100%;
+      background: #c8dcff;
+      color: #2563eb;
+      font-size: 52px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* ── 用户信息 ── */
+    .username {
+      font-size: 22px;
+      font-weight: 700;
+      color: #1f2937;
+      margin-bottom: 4px;
+      text-align: center;
+    }
+    .uid {
+      font-size: 13px;
+      color: #6b7280;
+      margin-bottom: 4px;
+      text-align: center;
+    }
+    .sig {
+      font-size: 13px;
+      color: #6b7280;
+      margin-bottom: 12px;
+      text-align: center;
+      max-width: 300px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* ── 分隔线 ── */
+    .divider {
+      width: 160px;
+      height: 1px;
+      background: var(--accent-dim);
+      margin: 8px 0 14px;
+    }
+
+    /* ── 统计条 ── */
+    .stats {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-bottom: 4px;
+    }
+    .stat-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 7px 14px;
+      border-radius: 8px;
+    }
+    .stat-bar.hp   { background: #fee2e2; }
+    .stat-bar.sp   { background: #fef3c7; }
+    .stat-bar.soul { background: #f3e8ff; }
+    .stat-label {
+      font-size: 12px;
+      color: #6b7280;
+      font-weight: 500;
+    }
+    .stat-value {
+      font-size: 18px;
+      font-weight: 700;
+    }
+    .stat-bar.hp   .stat-value { color: #dc2626; }
+    .stat-bar.sp   .stat-value { color: #d97706; }
+    .stat-bar.soul .stat-value { color: #9333ea; }
+
+    /* ── 信息行 ── */
+    .info-list {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+    .info-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 2px;
+      border-bottom: 1px solid #f3f4f6;
+      font-size: 13px;
+    }
+    .info-row:last-child { border-bottom: none; }
+    .info-key { color: #6b7280; }
+    .info-val { color: #1f2937; font-weight: 500; }
+  </style>
+</head>
+<body class="{{ season }}">
+  <div class="card">
+    {% if logo_data %}
+    <img class="logo-watermark" src="{{ logo_data }}" alt="">
+    {% endif %}
+
+    <div class="avatar-wrap">
+      {% if avatar_data %}
+      <img src="{{ avatar_data }}" alt="avatar">
+      {% else %}
+      <div class="avatar-placeholder">{{ (username or '?')[0] | upper }}</div>
+      {% endif %}
+    </div>
+
+    <div class="username">{{ username or '(未知用户)' }}</div>
+    <div class="uid">数字ID: {{ uid or '-' }}</div>
+    {% if signature %}
+    <div class="sig">{{ signature }}</div>
+    {% endif %}
+
+    <div class="divider"></div>
+
+    {% set has_stat = (hp and hp != '0') or sp_coin or (soul and soul != '0') %}
+    {% if has_stat %}
+    <div class="stats">
+      {% if hp and hp != '0' %}
+      <div class="stat-bar hp">
+        <span class="stat-label">HP</span>
+        <span class="stat-value">{{ hp }}</span>
+      </div>
+      {% endif %}
+      {% if sp_coin %}
+      <div class="stat-bar sp">
+        <span class="stat-label">SP币</span>
+        <span class="stat-value">{{ sp_coin }}</span>
+      </div>
+      {% endif %}
+      {% if soul and soul != '0' %}
+      <div class="stat-bar soul">
+        <span class="stat-label">魄</span>
+        <span class="stat-value">{{ soul }}</span>
+      </div>
+      {% endif %}
+    </div>
+    <div class="divider"></div>
+    {% endif %}
+
+    <div class="info-list">
+      {% if essence and essence != '0' %}
+      <div class="info-row"><span class="info-key">精华</span><span class="info-val">{{ essence }}</span></div>
+      {% endif %}
+      {% if posts and posts != '0' %}
+      <div class="info-row"><span class="info-key">发帖</span><span class="info-val">{{ posts }}</span></div>
+      {% endif %}
+      {% if lp and lp != '0' %}
+      <div class="info-row"><span class="info-key">LP</span><span class="info-val">{{ lp }}</span></div>
+      {% endif %}
+      {% if title and title not in ('-', '0') %}
+      <div class="info-row"><span class="info-key">会员头衔</span><span class="info-val">{{ title }}</span></div>
+      {% endif %}
+      {% if online_hours and online_hours not in ('-', '0 小时', '0') %}
+      <div class="info-row"><span class="info-key">在线时间</span><span class="info-val">{{ online_hours }}</span></div>
+      {% endif %}
+      {% if register_date and register_date not in ('-', '0') %}
+      <div class="info-row"><span class="info-key">注册时间</span><span class="info-val">{{ register_date }}</span></div>
+      {% endif %}
+      {% if last_login_date and last_login_date not in ('-', '0') %}
+      <div class="info-row"><span class="info-key">最后登录</span><span class="info-val">{{ last_login_date }}</span></div>
+      {% endif %}
+    </div>
+  </div>
+</body>
+</html>

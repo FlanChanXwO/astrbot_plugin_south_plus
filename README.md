@@ -1,50 +1,55 @@
 # astrbot_plugin_south_plus
 
-South Plus 多用户凭证与自动任务管理插件。
+<div align="center">
 
-## 当前能力
+<img src="assets/logo.png" width="200" alt="south-plus"/>
 
-- `/splogin` 生成一次性临时登录链接（默认有效 10 分钟）。登录页带南+ logo，整体配色贴近原站。
-- 用户在临时网页表单里填写账号、密码、人工验证码；插件后端代理拉取站点验证码图片。登录成功后插件立即抓 `profile.php` 取真实 UID 与用户名再入库。
-- **多账号绑定**：同一聊天用户可绑定多个南+ UID，每个 UID 在全局只能被一个聊天用户持有；重复绑定按"已是自己"/"被他人占用"分类提示。
-- 登录成功提示形如：`登录成功：用户名：xxx，id：xxx`。
-- `/spprofile` 用当前激活账号抓 `https://bbs.south-plus.org/profile.php` 并用 Pillow 渲染资料卡片（含头像 + 用户名 + UID + 14 项数值）。
-- `/spcheckin` 对激活账号执行**日签（cid=15）+ 周签（cid=14）**。先查本地 `checkin_record` 表，"今天/本周"已签的维度直接复用记录不打扰站点；只对未签维度调站点接口。返回回执同时显示日签 + 周签状态。
-- `/spuidlist` 列出已绑定 UID（带激活标记）。
-- `/spswitch <uid>` 切换激活账号。
-- `/spdelete <uid>` 删除指定 UID 绑定；如果删的是激活账号，自动用最近使用的另一条接管激活位。
-- `/spbindcookie <cookie>` 直接用 Cookie 绑定（会先拉 profile 拿 UID 再入库）。
-- `/spstatus` 查看当前激活账号状态。
-- Cookie 按配置加密写入 SQLite；账号密码不落库、不打日志。
-- 链接超时、提交失败、用户取消都会有明确的页面提示和聊天回执；未知路径返回 404。
-- Dashboard 插件 Page 提供管理员账号列表 / 删除 / 切换。
+**South Plus 凭证与任务自动化 AstrBot 插件**
 
-## 开发与运行
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+![Python Version](https://img.shields.io/badge/Python-3.10%2B-blue)
+![AstrBot](https://img.shields.io/badge/AstrBot-%E2%89%A54.24.0-green)
+![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20MacOS-lightgrey)
 
-本插件位于 AstrBot runtime：
+</div>
+
+## 项目简介
+
+`astrbot_plugin_south_plus` 为 AstrBot 提供 South Plus 社区凭证管理与自动签到能力。
+
+核心能力：
+
+- `/splogin` 生成一次性临时登录链接（默认有效 10 分钟），网页表单代理拉取站点验证码。
+- **多账号绑定**：同一聊天用户可绑定多个南+ UID，全局唯一持有约束。
+- `/spprofile` 渲染 HTML+t2i 资料卡片（头像、用户名、UID、14 项数值，季节配色）。
+- `/spcheckin` 日签（cid=15）+ 周签（cid=14），已签期直接复用本地记录。
+- `/spuidlist` / `/spswitch` / `/spdelete` — 多 UID 列表、切换、删除。
+- `/spbindcookie` — 直接用 Cookie 绑定。
+- Dashboard Plugin Pages 管理员管理账号、群组、调度任务、用户-群关系与签到历史。
+  - 调度页“参与账号”可按会话排除/恢复某个 UID 的自动签到，不影响其他会话或账号全局开关。
+
+## 安装
+
+推荐在 AstrBot 插件市场搜索 `south_plus` 安装。
+
+手动安装：
 
 ```bash
-/Users/flanchan/Development/SourceCode/GithubProjects/astrbot-plugin-dev/data/plugins/astrbot_plugin_south_plus
+cd AstrBot/data/plugins
+git clone https://github.com/FlanChanXwO/astrbot_plugin_south_plus.git
 ```
 
-启动 AstrBot：
+安装后重启 AstrBot 或重载插件。
 
-```bash
-cd /Users/flanchan/Development/SourceCode/GithubProjects/astrbot-plugin-dev
-astrbot run -r -p 6196
-```
+## 文档导航
 
-## 插件结构
-
-- `main.py`：AstrBot 命令、Web API 注册与生命周期协调。
-- `src/southplus/`：**对 South Plus 站点逆向得到的接口、数据模型与常量**（URL、表单字段、cookie 命名、成功/失败判定、profile 抓取/解析）。`src/southplus/api/` 是对外接口层，`src/core/` 与 `main.py` 只通过它引用本包；实现模块（`client.py / models.py / constants.py / profile_client.py`）禁止被 core 直接 import。
-- `src/core/`：与站点解耦的框架代码（登录表单 server、SQLite data source、通用 datamodels、配置、日志、Pillow 资料卡片渲染）。
-- `src/shared/`：项目级共享常量（`PLUGIN_NAME`、日志前缀等非抓包常量）。
-- `src/utils/`：无状态工具子包（`crypto / text / timeutil / url`），通过 `from src.utils import ...` 统一引用。
-- `templates/`：登录 / 过期 / 通用消息 / 404 页面 HTML 模板（`string.Template` 渲染）。
-- `assets/`：静态资源（南+ logo 等），通过 `/assets/<filename>` 路由对外提供。
-- `pages/credentials/`：Dashboard 凭证管理页面。
-- `docs/`：维护、开发、安全说明，以及 `docs/southplus-capture.md`——South Plus 抓包流程与最近一次抓包结果（含 Capture 日期约束）。
+| 文档 | 内容 |
+|------|------|
+| [开发与维护](docs/dev/maintenance.md) | 包边界、安全边界、文档纪律、迁移规则 |
+| [项目概览](docs/project/README.md) | 能力说明与架构分层 |
+| [South Plus 抓包](docs/southplus-capture.md) | 逆向记录与 Capture 日期约束 |
+| [安全说明](docs/security.md) | Cookie 存储、密钥、边界 |
+| [开发说明](docs/development.md) | 本地开发与调试 |
 
 ## 关键配置
 
@@ -55,22 +60,37 @@ astrbot run -r -p 6196
 | `auth_base_url` | 空 | 公网展示根地址，公网部署必须填 HTTPS 反代后的根。 |
 | `auth_token_ttl_seconds` | `600` | 登录链接有效期（秒）。 |
 | `cookie_encryption_key` | 空 | Cookie 加密 key；留空时明文存储（仅推荐本机调试）。 |
-| `user_agent` | 空 | 留空时使用 `src/api/constants.py::DEFAULT_USER_AGENT`；反爬升级时可覆盖。 |
+| `user_agent` | 空 | 留空时使用内置 UA；反爬升级时可覆盖。 |
 
-> South Plus 站点本身的 URL、cookie 域、表单字段等抓包结论硬编码在 `src/api/constants.py`，不暴露给 Dashboard 配置——改 South Plus 需要走"重新抓包 → 更新 `docs/southplus-capture.md` 的 Capture 日期 → 改 `src/api/`"的流程，不是改 Dashboard。
+> South Plus 站点本身的 URL、cookie 域、表单字段等抓包结论硬编码在 `src/southplus/api/constants.py`，不暴露给 Dashboard——改 South Plus 走"重新抓包 → 更新 `docs/southplus-capture.md` Capture 日期 → 改 `src/southplus/`"流程。
 
 ## 临时登录链接
 
 默认监听 `127.0.0.1` 的随机端口。要让远程用户打开链接，请：
 
-1. 把 `auth_listen_host` 改为可被反代访问的地址（或保持 `127.0.0.1` 由反代回源）。
+1. 把 `auth_listen_host` 改为可被反代访问的地址。
 2. 把 `auth_listen_port` 设为固定端口。
 3. 把 `auth_base_url` 设为反代后的 HTTPS 根地址（不带尾斜杠）。
 
+## 开发与测试
+
+从插件目录运行：
+
+```bash
+python -m compileall .
+python -m pytest
+ruff check .
+```
+
+重载插件（从 AstrBot runtime 根目录）：
+
+```bash
+scripts/astrbot/reload-plugins.sh 6196 astrbot_plugin_south_plus
+```
+
 ## 安全说明
 
-- 账号、密码只在单次请求驻留内存，不写入 SQLite。
+- 账号、密码只在单次请求驻留内存，不写入 SQLite，不打日志。
 - 登录链接使用随机 token，提交成功后立即失效。
-- 未提交的链接按 `auth_token_ttl_seconds` 失效并通知用户。
-- `cookie_encryption_key` 配置后，SQLite 中的 Cookie 字段以 v1 加密格式存储；丢失 key 等同丢失 Cookie。
-- Dashboard Page 依赖 AstrBot Dashboard 鉴权，适合管理员管理凭证。
+- `cookie_encryption_key` 配置后，SQLite 中的 Cookie 以加密格式存储；丢失 key 等同丢失 Cookie。
+- Dashboard Page 依赖 AstrBot Dashboard 鉴权，适合管理员管理账号与调度；页面只展示脱敏 Cookie，不提供密码或明文 Cookie 编辑入口。

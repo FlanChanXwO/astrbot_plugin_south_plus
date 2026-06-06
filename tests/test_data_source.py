@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+from src.core.db import CheckinSessionExclusionStore, setup_db
 from src.core.db.user_store import UserStore
 from src.core.datamodels import AddAccountStatus, UserRow
 from src.utils import mask_secret
@@ -105,23 +106,24 @@ def test_list_for_account_orders_active_first(tmp_path: Path) -> None:
     assert items[1].is_active is False
 
 
-def test_cookie_is_encrypted_on_disk(tmp_path: Path) -> None:
+def test_cookie_is_stored_in_plaintext(tmp_path: Path) -> None:
+    """验证 cookie 明文存入 SQLite。"""
     db = tmp_path / "sp.db"
-    store = UserStore(db, cookie_encryption_key="key-a")
+    store = UserStore(db)
     _add(store, sp_uid="100", cookie="eb9e6_winduser=alice")
     with sqlite3.connect(db) as conn:
         row = conn.execute("SELECT cookie FROM \"user\" WHERE sp_uid='100'").fetchone()
     assert row is not None
-    assert "winduser=alice" not in row[0]
+    assert "winduser=alice" in row[0]
     assert store.get_by_uid("100").cookie == "eb9e6_winduser=alice"
 
 
-def test_wrong_encryption_key_returns_empty_cookie(tmp_path: Path) -> None:
+def test_wrong_key_no_longer_applicable(tmp_path: Path) -> None:
+    """cookie 已明文存储，加解密相关测试不再适用。"""
     db = tmp_path / "sp.db"
-    a = UserStore(db, cookie_encryption_key="key-a")
-    _add(a, sp_uid="100", cookie="ck-secret")
-    b = UserStore(db, cookie_encryption_key="key-b")
-    assert b.get_by_uid("100").cookie == ""
+    store = UserStore(db)
+    _add(store, sp_uid="100", cookie="ck-secret")
+    assert store.get_by_uid("100").cookie == "ck-secret"
 
 
 def test_list_all(tmp_path: Path) -> None:
@@ -150,3 +152,41 @@ def test_delete_stale_empty_keep_clears_all(tmp_path: Path) -> None:
 
 def test_mask_short_secret() -> None:
     assert mask_secret("short") == "***"
+
+
+def test_checkin_session_exclusion_store_is_session_scoped(tmp_path: Path) -> None:
+    store = CheckinSessionExclusionStore(tmp_path / "sp.db")
+
+    first = store.exclude(umo="umo-a", sp_uid="uid-1")
+    second = store.exclude(umo="umo-a", sp_uid="uid-1")
+    store.exclude(umo="umo-b", sp_uid="uid-1")
+
+    assert first.id == second.id
+    assert store.list_uids("umo-a") == {"uid-1"}
+    assert store.list_uids("umo-b") == {"uid-1"}
+    assert store.restore(umo="umo-a", sp_uid="uid-1") is True
+    assert store.list_uids("umo-a") == set()
+    assert store.list_uids("umo-b") == {"uid-1"}
+
+
+def test_v3_migration_creates_session_exclusion_table_idempotently(
+    tmp_path: Path,
+) -> None:
+    db = tmp_path / "sp.db"
+
+    setup_db(db)
+    setup_db(db)
+
+    with sqlite3.connect(db) as conn:
+        table = conn.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='checkin_session_exclusion'"
+        ).fetchone()
+        unique_index = conn.execute(
+            "SELECT sql FROM sqlite_master "
+            "WHERE type='index' AND tbl_name='checkin_session_exclusion' "
+            "AND sql IS NULL"
+        ).fetchone()
+
+    assert table is not None
+    assert unique_index is not None

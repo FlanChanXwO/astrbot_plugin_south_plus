@@ -8,6 +8,8 @@ import urllib.request
 
 import pytest
 
+import datetime
+
 from src.southplus.api import (
     LoginRequest,
     LoginResult,
@@ -15,8 +17,9 @@ from src.southplus.api import (
     SouthPlusEndpoints,
     SouthPlusSession,
 )
-from src.core.auth_server import CredentialFormServer
 from src.core.datamodels import AuthServerConfig, CredentialSession
+from src.utils import season_name
+from src.web.auth_server import CredentialFormServer, _seasonal_logo
 from tests.conftest import MockSouthPlusState
 
 
@@ -83,6 +86,12 @@ def test_form_page_lists_token_and_captcha(mock_southplus: MockSouthPlusState) -
             html = response.read().decode("utf-8")
         assert session.token in html
         assert "/captcha/" in html
+        # 验证季节 logo 出现在渲染的 HTML 中
+        expected_logo = _seasonal_logo()
+        assert f'src="/assets/{expected_logo}"' in html
+        # 验证 body 上有季节 class
+        expected_season = season_name()
+        assert f'class="season-{expected_season}"' in html
     finally:
         server.shutdown()
 
@@ -315,5 +324,61 @@ def test_assets_path_traversal_rejected(mock_southplus: MockSouthPlusState) -> N
         assert exc2.value.code == 404
         body2 = exc2.value.read().decode("utf-8")
         assert "from __future__" not in body2
+    finally:
+        server.shutdown()
+
+
+def test_season_name_matches_logo() -> None:
+    """``season_name`` 与 ``_seasonal_logo`` 的月份判定一致。"""
+    for month in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12):
+        dt = datetime.datetime(2025, month, 15)
+        logo = _seasonal_logo(dt)
+        name = season_name(dt)
+        assert name in logo, f"{month=}: {name=} not in {logo=}"
+
+
+def test_seasonal_logo_boundaries() -> None:
+    """季节 logo 月份边界测试。"""
+    # 冬季：12-2 月
+    assert _seasonal_logo(datetime.datetime(2025, 1, 15)) == "logo-winter5.png"
+    # 春季：3-5 月
+    assert _seasonal_logo(datetime.datetime(2025, 4, 15)) == "logo-spring-south.png"
+    # 夏季：6-8 月
+    assert _seasonal_logo(datetime.datetime(2025, 7, 15)) == "logo-s-summer2.png"
+    # 秋季：9-11 月
+    assert _seasonal_logo(datetime.datetime(2025, 10, 15)) == "logo-fall4.png"
+    # 边界：12 月
+    assert _seasonal_logo(datetime.datetime(2025, 12, 15)) == "logo-winter5.png"
+    # 边界：2 月最后一天
+    assert _seasonal_logo(datetime.datetime(2025, 2, 28)) == "logo-winter5.png"
+    # 边界：3 月 1 日进入春季
+    assert _seasonal_logo(datetime.datetime(2025, 3, 1)) == "logo-spring-south.png"
+
+
+def test_seasonal_logo_defaults_to_current_month() -> None:
+    """无参调用不崩溃，返回已知值。"""
+    result = _seasonal_logo()
+    assert result in (
+        "logo-winter5.png",
+        "logo-spring-south.png",
+        "logo-s-summer2.png",
+        "logo-fall4.png",
+    )
+
+
+def test_assets_fallback_to_resources(mock_southplus: MockSouthPlusState) -> None:
+    """验证 resources/ 下的季节 logo 可通过 /assets/ 路由访问。"""
+    server = _make_server(mock_southplus)
+    try:
+        server.ensure_started()
+        url = (
+            f"http://{server.config.listen_host}:{server.actual_port}"
+            "/assets/logo-spring-south.png"
+        )
+        with urllib.request.urlopen(url) as response:
+            assert response.status == 200
+            assert response.headers.get("Content-Type", "") == "image/png"
+            body = response.read()
+            assert body.startswith(b"\x89PNG")
     finally:
         server.shutdown()

@@ -7,7 +7,6 @@ import time
 from pathlib import Path
 
 import qrcode
-from quart import jsonify, request
 
 from astrbot.api import AstrBotConfig
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
@@ -16,28 +15,26 @@ from astrbot.api.message_components import Image as CompImage
 from astrbot.api.message_components import Node, Plain
 from astrbot.api.star import Context, Star
 
-from .src.core.auth_server import CredentialFormServer
+from .src.web.auth_server import CredentialFormServer
 from .src.core.checkin_scheduler import CheckinScheduler
 from .src.core.config_manager import PluginConfigManager
 from .src.core.db import (
+    CheckinSessionExclusionStore,
     CheckinStore,
     GroupStore,
     ScheduleStore,
     UserGroupStore,
     UserStore,
+    setup_db,
 )
-from .src.core.datamodels import (
-    AddAccountResult,
-    AddAccountStatus,
-    CredentialSession,
-)
+from .src.core.datamodels import CredentialSession
+from .src.pages import register_page_apis
 from .src.utils.logger import plugin_logger
-from .src.core.user_card_render import render_user_card
+from .src.render.card_render import render_user_card
 from .src.shared.constants import PLUGIN_NAME
 from .src.southplus.api import (
     CheckinReport,
     CheckinService,
-    CheckinStatus,
     CheckinTaskResult,
     LoginRequest,
     LoginResult,
@@ -46,12 +43,16 @@ from .src.southplus.api import (
     SouthPlusProfileApi,
     SouthPlusProfileError,
     SouthPlusSession,
-    UserProfile,
 )
 from .src.utils import (
     current_iso_week,
     current_iso_week_label,
     current_local_date,
+    format_add_account_result,
+    format_checkin_response,
+    get_event_platform,
+    is_aiocqhttp_event,
+    season_name,
     wrap_docs_link,
 )
 
@@ -65,8 +66,10 @@ class SouthPlusPlugin(Star):
         self.config_manager = PluginConfigManager(self.config)
         self.config_snapshot = self.config_manager.snapshot()
         db_path = self.config_snapshot.database_path
+        setup_db(db_path)
         self.store = UserStore(db_path)
         self.checkin_store = CheckinStore(db_path)
+        self.checkin_exclusion_store = CheckinSessionExclusionStore(db_path)
         self.group_store = GroupStore(db_path)
         self.user_group_store = UserGroupStore(db_path)
         self.schedule_store = ScheduleStore(db_path)
@@ -82,6 +85,7 @@ class SouthPlusPlugin(Star):
             user_store=self.store,
             checkin_store=self.checkin_store,
             schedule_store=self.schedule_store,
+            exclusion_store=self.checkin_exclusion_store,
             send_message=self.context.send_message,  # type: ignore[union-attr]
         )
         self.form_server = CredentialFormServer(
@@ -89,7 +93,16 @@ class SouthPlusPlugin(Star):
             client=self.client,
             on_login_success=self._handle_login_success,
         )
-        self._register_page_apis(context)
+        register_page_apis(
+            context,
+            user_store=self.store,
+            group_store=self.group_store,
+            user_group_store=self.user_group_store,
+            schedule_store=self.schedule_store,
+            checkin_store=self.checkin_store,
+            exclusion_store=self.checkin_exclusion_store,
+            scheduler=self.scheduler,
+        )
         if self.config_snapshot.auto_checkin_enabled:
             self.scheduler.start(
                 concurrency=self.config_snapshot.auto_checkin_concurrency,
@@ -106,7 +119,7 @@ class SouthPlusPlugin(Star):
         session = self.form_server.create_session(
             user_key=event.get_sender_id(),
             unified_msg_origin=event.unified_msg_origin,
-            platform=_get_platform(event),
+            platform=get_event_platform(event),
         )
         self._expiry_tasks[session.token] = asyncio.create_task(
             self._expire_login_later(session)
@@ -117,7 +130,9 @@ class SouthPlusPlugin(Star):
 
         strategy = self.config_snapshot.login_link_strategy
         use_docs = self.config_snapshot.use_docs_link_wrapper
-        use_forward = self.config_snapshot.use_forward_node and _is_aiocqhttp(event)
+        use_forward = self.config_snapshot.use_forward_node and is_aiocqhttp_event(
+            event
+        )
 
         # --- 构建消息组件 ---
         components: list = []
@@ -179,7 +194,7 @@ class SouthPlusPlugin(Star):
     async def sp_status(self, event: AstrMessageEvent):
         """查看当前激活账号。"""
         account = event.get_sender_id()
-        platform = _get_platform(event)
+        platform = get_event_platform(event)
         active = self.store.get_active(account, platform)
         accounts = self.store.list_for_account(account, platform)
         if not active and not accounts:
@@ -201,7 +216,7 @@ class SouthPlusPlugin(Star):
     async def sp_uid_list(self, event: AstrMessageEvent):
         """列出当前用户已绑定的所有 South Plus UID。"""
         account = event.get_sender_id()
-        platform = _get_platform(event)
+        platform = get_event_platform(event)
         users = self.store.list_for_account(account, platform)
         if not users:
             yield event.plain_result("当前账号尚未绑定任何 UID。请用 /splogin 登录。")
@@ -221,7 +236,7 @@ class SouthPlusPlugin(Star):
             yield event.plain_result("用法：/spswitch <uid>")
             return
         account = event.get_sender_id()
-        platform = _get_platform(event)
+        platform = get_event_platform(event)
         if not self.store.switch_active(account, platform, uid):
             yield event.plain_result(
                 f"UID {uid} 不在你的绑定列表里。/spuidlist 查看已绑定 UID。"
@@ -267,10 +282,16 @@ class SouthPlusPlugin(Star):
         result = self.store.add_or_update(
             sp_uid=profile.uid,
             account=event.get_sender_id(),
-            platform=_get_platform(event),
+            platform=get_event_platform(event),
             cookie=refreshed_cookie,
         )
-        yield event.plain_result(_format_add_result(result, profile))
+        yield event.plain_result(
+            format_add_account_result(
+                result,
+                profile,
+                auto_checkin_hint=self.config_snapshot.auto_checkin_enabled,
+            )
+        )
 
     # ------------------------------------------------------------------
     # 资料卡片
@@ -279,7 +300,7 @@ class SouthPlusPlugin(Star):
     @filter.command("spprofile", alias={"sp资料"})
     async def sp_profile(self, event: AstrMessageEvent):
         """抓取激活账号的资料并渲染成卡片图。"""
-        active = self.store.get_active(event.get_sender_id(), _get_platform(event))
+        active = self.store.get_active(event.get_sender_id(), get_event_platform(event))
         if not active or not active.cookie:
             yield event.plain_result(
                 "当前没有激活的 South Plus 账号。请用 /splogin 登录。"
@@ -300,8 +321,8 @@ class SouthPlusPlugin(Star):
             self.profile_client.fetch_avatar, profile.avatar_url
         )
         try:
-            png_bytes = await asyncio.to_thread(
-                render_user_card, profile, avatar_bytes=avatar_bytes
+            png_bytes = await render_user_card(
+                profile, avatar_bytes=avatar_bytes, season=season_name()
             )
         except Exception as exc:  # noqa: BLE001
             plugin_logger.exception("spprofile 卡片渲染失败")
@@ -324,7 +345,7 @@ class SouthPlusPlugin(Star):
     @filter.command("spcheckin", alias={"sp签到"})
     async def sp_checkin(self, event: AstrMessageEvent):
         """对当前激活账号执行日签 + 周签。"""
-        active = self.store.get_active(event.get_sender_id(), _get_platform(event))
+        active = self.store.get_active(event.get_sender_id(), get_event_platform(event))
         if not active or not active.cookie:
             yield event.plain_result(
                 "当前没有激活的 South Plus 账号。请用 /splogin 登录。"
@@ -384,7 +405,7 @@ class SouthPlusPlugin(Star):
             )
 
         yield event.plain_result(
-            _format_checkin_response(
+            format_checkin_response(
                 uid=sp_uid,
                 today=today,
                 this_week_label=current_iso_week_label(),
@@ -399,17 +420,17 @@ class SouthPlusPlugin(Star):
 
     @filter.command("spsubcheckin", alias={"sp订阅签到"})
     async def sp_sub_checkin(self, event: AstrMessageEvent):
-        """订阅当前会话的自动签到结果推送。"""
+        """订阅当前会话的自动签到结果推送（仅当前账号）。"""
         umo = event.unified_msg_origin
         account = event.get_sender_id()
         params = {"mode": "session", "account": account}
         self.scheduler.subscribe(
             umo,
-            task_key="sp.checkin.daily",
+            task_key="sp.checkin.session",
             cron=self.config_snapshot.auto_checkin_cron,
             params=params,
         )
-        yield event.plain_result("已订阅本会话的签到结果推送。")
+        yield event.plain_result("已订阅本会话的签到结果推送（仅当前账号）。")
 
     @filter.command("spunsubcheckin", alias={"sp取消签到"})
     async def sp_unsub_checkin(self, event: AstrMessageEvent):
@@ -417,8 +438,8 @@ class SouthPlusPlugin(Star):
         umo = event.unified_msg_origin
         account = event.get_sender_id()
         params = {"mode": "session", "account": account}
-        if self.scheduler.is_subscribed(umo, "sp.checkin.daily", params):
-            self.scheduler.unsubscribe(umo, "sp.checkin.daily", params)
+        if self.scheduler.is_subscribed(umo, "sp.checkin.session", params):
+            self.scheduler.unsubscribe(umo, "sp.checkin.session", params)
             yield event.plain_result("已取消本会话的签到结果订阅。")
         else:
             yield event.plain_result("当前会话未订阅签到结果。")
@@ -426,17 +447,30 @@ class SouthPlusPlugin(Star):
     @filter.command("spsubcheckinall", alias={"sp全体订阅"})
     @filter.permission_type(PermissionType.ADMIN)
     async def sp_sub_checkin_all(self, event: AstrMessageEvent):
-        """管理员：订阅全量签到结果推送。"""
+        """管理员：订阅全量签到结果推送（所有账号汇总）。"""
         umo = event.unified_msg_origin
         account = event.get_sender_id()
         params = {"mode": "all", "account": account}
         self.scheduler.subscribe(
             umo,
-            task_key="sp.checkin.daily",
+            task_key="sp.checkin.all",
             cron=self.config_snapshot.auto_checkin_cron,
             params=params,
         )
-        yield event.plain_result("已订阅全量签到结果推送（全局统计）。")
+        yield event.plain_result("已订阅全量签到结果推送（所有账号汇总）。")
+
+    @filter.command("spunsubcheckinall", alias={"sp取消全体订阅"})
+    @filter.permission_type(PermissionType.ADMIN)
+    async def sp_unsub_checkin_all(self, event: AstrMessageEvent):
+        """管理员：取消全量签到结果推送订阅。"""
+        umo = event.unified_msg_origin
+        account = event.get_sender_id()
+        params = {"mode": "all", "account": account}
+        if self.scheduler.is_subscribed(umo, "sp.checkin.all", params):
+            self.scheduler.unsubscribe(umo, "sp.checkin.all", params)
+            yield event.plain_result("已取消全量签到结果订阅。")
+        else:
+            yield event.plain_result("当前会话未订阅全量签到结果。")
 
     @filter.command("spallcheckin", alias={"sp全体签到"})
     @filter.permission_type(PermissionType.ADMIN)
@@ -444,6 +478,38 @@ class SouthPlusPlugin(Star):
         """管理员：立即执行全部绑定账号签到。"""
         text = await self.scheduler.run_all_checkins()
         yield event.plain_result(text)
+
+    @filter.command("spautocheckin", alias={"sp自动签到"})
+    async def sp_set_auto_checkin(self, event: AstrMessageEvent):
+        """开关当前激活账号的自动签到。用法：/spautocheckin on 或 off"""
+        account = event.get_sender_id()
+        platform = event.get_platform_name()
+        user = self.store.get_active(account, platform)
+        if user is None:
+            yield event.plain_result("当前未绑定南+ 账号，请先用 /splogin 登录。")
+            return
+
+        raw_args = event.message_str.strip().split()
+        if len(raw_args) < 2:
+            status = "已开启" if user.auto_checkin else "已关闭"
+            yield event.plain_result(
+                f"当前账号（{user.sp_uid}）自动签到：{status}\n"
+                "使用 /spautocheckin on 或 off 切换。"
+            )
+            return
+
+        flag = raw_args[1].lower()
+        if flag in ("on", "1", "true", "开启"):
+            enabled = True
+        elif flag in ("off", "0", "false", "关闭"):
+            enabled = False
+        else:
+            yield event.plain_result("参数无效，请使用 on 或 off。")
+            return
+
+        self.store.set_auto_checkin(user.sp_uid, enabled)
+        status = "已开启" if enabled else "已关闭"
+        yield event.plain_result(f"账号 {user.sp_uid} 的自动签到已{status}。")
 
     # ------------------------------------------------------------------
     # 清理
@@ -544,7 +610,12 @@ class SouthPlusPlugin(Star):
             cookie=result.cookie,
         )
         self._notify_from_thread(
-            session.unified_msg_origin, _format_add_result(add_result, profile)
+            session.unified_msg_origin,
+            format_add_account_result(
+                add_result,
+                profile,
+                auto_checkin_hint=self.config_snapshot.auto_checkin_enabled,
+            ),
         )
 
     def _cancel_expiry_task(self, token: str) -> None:
@@ -562,56 +633,6 @@ class SouthPlusPlugin(Star):
             unified_msg_origin, MessageChain().message(text)
         )
 
-    # ------------------------------------------------------------------
-    # Dashboard Web API
-    # ------------------------------------------------------------------
-
-    def _register_page_apis(self, context: Context) -> None:
-        context.register_web_api(
-            f"/{PLUGIN_NAME}/accounts",
-            self.api_list_accounts,
-            ["GET"],
-            "List accounts",
-        )
-        context.register_web_api(
-            f"/{PLUGIN_NAME}/accounts/delete",
-            self.api_delete_account,
-            ["POST"],
-            "Delete account",
-        )
-        context.register_web_api(
-            f"/{PLUGIN_NAME}/accounts/switch",
-            self.api_switch_account,
-            ["POST"],
-            "Switch active account",
-        )
-
-    async def api_list_accounts(self):
-        return jsonify(
-            {
-                "ok": True,
-                "items": [item.to_public_dict() for item in self.store.list_all()],
-            }
-        )
-
-    async def api_delete_account(self):
-        payload = await request.get_json(force=True)
-        user_key = str(payload.get("user_key", "")).strip()
-        uid = str(payload.get("uid", "")).strip()
-        if not user_key or not uid:
-            return jsonify({"ok": False, "message": "user_key 与 uid 必填"}), 400
-        ok = self.store.delete_account(account=user_key, sp_uid=uid)
-        return jsonify({"ok": ok})
-
-    async def api_switch_account(self):
-        payload = await request.get_json(force=True)
-        user_key = str(payload.get("user_key", "")).strip()
-        uid = str(payload.get("uid", "")).strip()
-        if not user_key or not uid:
-            return jsonify({"ok": False, "message": "user_key 与 uid 必填"}), 400
-        ok = self.store.switch_active(account=user_key, platform="", sp_uid=uid)
-        return jsonify({"ok": ok})
-
     async def terminate(self) -> None:
         self.scheduler.stop()
         for task in self._expiry_tasks.values():
@@ -619,71 +640,3 @@ class SouthPlusPlugin(Star):
         self._expiry_tasks.clear()
         self.form_server.shutdown()
         plugin_logger.info("South Plus plugin terminated.")
-
-
-def _format_add_result(result: AddAccountResult, profile: UserProfile) -> str:
-    username = profile.username or "(未记录)"
-    uid = profile.uid or result.account.sp_uid or "(未知)"
-    if result.status is AddAccountStatus.CREATED:
-        return f"登录成功：用户名：{username}，id：{uid}"
-    if result.status is AddAccountStatus.REFRESHED:
-        return (
-            f"登录成功（该 UID 已绑定过，已刷新 Cookie 并切换为当前账号）：\n"
-            f"用户名：{username}，id：{uid}"
-        )
-    return (
-        f"该 UID（{uid}）已被其他用户绑定，无法绑定。\n"
-        "如确需迁移，请联系管理员从数据库删除该 UID 的旧绑定后再试。"
-    )
-
-
-# --- 签到 helper -----------------------------------------------------------
-
-
-def _format_checkin_response(
-    *,
-    uid: str,
-    today: str,
-    this_week_label: str,
-    fresh_daily: CheckinTaskResult | None,
-    fresh_weekly: CheckinTaskResult | None,
-) -> str:
-    daily_line = _format_dimension_line(
-        label="日签",
-        period_key=today,
-        fresh=fresh_daily,
-    )
-    weekly_line = _format_dimension_line(
-        label="周签",
-        period_key=this_week_label,
-        fresh=fresh_weekly,
-    )
-    return f"South Plus 签到结果\nUID: {uid}\n{daily_line}\n{weekly_line}"
-
-
-def _format_dimension_line(
-    *,
-    label: str,
-    period_key: str,
-    fresh: CheckinTaskResult | None,
-) -> str:
-    if fresh is None:
-        return f"{label}（{period_key}，缓存）: 已签到"
-    if fresh.status is CheckinStatus.SUCCESS:
-        return f"{label}（{period_key}，新签）: 成功，{fresh.message}"
-    if fresh.status is CheckinStatus.ALREADY_DONE:
-        return f"{label}（{period_key}，新签）: 已签到，{fresh.message}"
-    detail = fresh.message or fresh.error or "未知错误"
-    return f"{label}（{period_key}，新签）: 失败，{detail}"
-
-
-# --- 平台 helper -----------------------------------------------------------
-
-
-def _get_platform(event: AstrMessageEvent) -> str:
-    return (event.get_platform_name() or "").strip()
-
-
-def _is_aiocqhttp(event: AstrMessageEvent) -> bool:
-    """是否为 aiocqhttp（OneBot v11）平台。"""
-    return "aiocqhttp" in _get_platform(event)

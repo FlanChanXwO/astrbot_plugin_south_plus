@@ -245,6 +245,10 @@ def _parse_avatar(body: str) -> str:
     """
 
     patterns = (
+        # img.pic：实际 profile 页面的头像标记 <img class="pic" src="...">。
+        r'<img[^>]*class="[^"]*\bpic\b[^"]*"[^>]*src="([^"]+)"',
+        # #u-portrait > img：用户报告的可能选择器。
+        r'id="u-portrait"[^>]*>.*?<img[^>]+src="([^"]+)"',
         # .pic > img：phpwind profile.php 用户提示的首选选择器。
         r'class="[^"]*\bpic\b[^"]*"[^>]*>\s*(?:<a[^>]*>\s*)?<img[^>]+src="([^"]+)"',
         # 历史兜底：旧模板里头像 src 含 ``faceimg`` / ``uploadface`` / ``avatar`` 关键字。

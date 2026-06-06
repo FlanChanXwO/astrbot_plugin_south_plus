@@ -10,14 +10,14 @@
 
 ## 这份文档存在的目的
 
-本插件的 `src/api/` 包封装了对 South Plus 站点的 HTTP 调用。所有 URL、表单字段、cookie 命名、成功/失败判定、验证码格式都是逆向得来的，South Plus 改版时会失效。本文档记录：
+本插件的 `src/southplus/api/` 包封装了对 South Plus 站点的 HTTP 调用。所有 URL、表单字段、cookie 命名、成功/失败判定、验证码格式都是逆向得来的，South Plus 改版时会失效。本文档记录：
 
-1. 当前 `src/api/` 反映的是哪一天抓包的结果。
+1. 当前 `src/southplus/api/` 反映的是哪一天抓包的结果。
 2. 任何接手的人（维护者或 agent）如何零账号、零先验地重做一次抓包。
-3. 抓包结论应该如何映射到 `src/api/` 的具体符号。
+3. 抓包结论应该如何映射到 `src/southplus/api/` 的具体符号。
 4. 验证抓包结果是否仍然有效的方法。
 
-读懂这份文档应当足以独立完成"South Plus 改版 → 重新抓包 → 更新 src/api/ → 跑测试通过"的全流程。
+读懂这份文档应当足以独立完成"South Plus 改版 → 重新抓包 → 更新 src/southplus/api/ → 跑测试通过"的全流程。
 
 ## 工具与前置条件
 
@@ -154,7 +154,7 @@ file /tmp/sp_captcha.bin
 | `账号被锁定` | 账号被站点锁定。 |
 | `登录次数` | 登录失败次数过多，请稍后再试。 |
 
-若 South Plus 把错误文案换成英文或换字（例如 "验证码错误" → "验证码不正确"），更新 `src/api/client.py::_classify_failure`。
+若 South Plus 把错误文案换成英文或换字（例如 "验证码错误" → "验证码不正确"），更新 `src/southplus/api/login.py::_classify_failure`。
 
 ## 步骤 6：登录跳转与登录后页面（可选）
 
@@ -212,32 +212,32 @@ file /tmp/sp_captcha.bin
 
 | 判定 | 实现位置 | 当前逻辑 |
 | --- | --- | --- |
-| 登录成功 | `src/api/client.py::_has_phpwind_login_cookie` 读 `constants.LOGIN_COOKIE_NAME_SUFFIXES` | cookie jar 出现 `*_winduser` 或 `*_winduid` |
-| Cookie 未生效 | `src/api/client.py::_looks_login_page` | URL 含 `login.php` 或正文含 `登录` 且不含 `退出` |
-| 失败原因分类 | `src/api/client.py::_classify_failure` 读 `constants.FAILURE_KEYWORDS` | 见步骤 5 关键字表 |
-| 验证码字节合法 | `src/api/client.py::SouthPlusLoginAttempt.fetch_captcha` | content-type 含 `image/` 或字节以 `\x89PNG` 起头 |
+| 登录成功 | `src/southplus/api/login.py::_has_phpwind_login_cookie` 读 `constants.LOGIN_COOKIE_NAME_SUFFIXES` | cookie jar 出现 `*_winduser` 或 `*_winduid` |
+| Cookie 未生效 | `src/southplus/api/login.py::_looks_login_page` | URL 含 `login.php` 或正文含 `登录` 且不含 `退出` |
+| 失败原因分类 | `src/southplus/api/login.py::_classify_failure` 读 `constants.FAILURE_KEYWORDS` | 见步骤 5 关键字表 |
+| 验证码字节合法 | `src/southplus/api/login.py::SouthPlusLoginAttempt.fetch_captcha` | content-type 含 `image/` 或字节以 `\x89PNG` 起头 |
 
 ## 如何把抓包结果落到代码
 
-`src/api/` 是抓包结论的唯一权威。改动按下表对号入座：
+`src/southplus/api/` 是抓包结论的唯一权威。改动按下表对号入座：
 
 | 抓包结论 | 落点 |
 | --- | --- |
-| 站点默认 URL / 路径 / UA | `src/api/constants.py::DEFAULT_SITE_BASE_URL / DEFAULT_LOGIN_PATH / DEFAULT_CAPTCHA_PATH / DEFAULT_VERIFY_PATH / DEFAULT_USER_AGENT` |
-| 表单 user-selectable 默认值 | `src/api/constants.py::DEFAULT_LOGIN_TYPE / DEFAULT_HIDE_ID / DEFAULT_COOKIE_TTL`（同时是 `LoginRequest` 字段默认） |
-| 表单 hidden 字段默认值 | `src/api/constants.py::DEFAULT_FORM_FORWARD / DEFAULT_FORM_STEP / DEFAULT_FORM_SUBMIT`（被 `SouthPlusLoginAttempt.submit` 消费） |
-| 登录请求模型 | `src/api/models.py::LoginRequest`（字段名与 phpwind 表单 1:1 映射） |
-| 登录结果模型 | `src/api/models.py::LoginResult / CaptchaPayload` |
-| 端点工厂 | `src/api/models.py::build_endpoints`——把用户配置补齐为 `SouthPlusEndpoints`；`config_manager` 仅负责把配置喂进去 |
-| 登录字段映射（构造 POST body） | `src/api/client.py::SouthPlusLoginAttempt.submit` |
-| 登录成功 cookie 后缀 | `src/api/constants.py::LOGIN_COOKIE_NAME_SUFFIXES`（被 `_has_phpwind_login_cookie` 消费） |
-| 失败关键字表 | `src/api/constants.py::FAILURE_KEYWORDS`（顺序 = 优先级；被 `_classify_failure` 消费） |
-| 登录态 URL/正文判定 | `src/api/client.py::_looks_login_page` |
-| 验证码字节合法性 | `src/api/client.py::SouthPlusLoginAttempt.fetch_captcha` |
-| cookie 域过滤 | `src/api/client.py::_cookie_header` + `SouthPlusEndpoints.cookie_domains` |
+| 站点默认 URL / 路径 / UA | `src/southplus/api/constants.py::DEFAULT_SITE_BASE_URL / DEFAULT_LOGIN_PATH / DEFAULT_CAPTCHA_PATH / DEFAULT_VERIFY_PATH / DEFAULT_USER_AGENT` |
+| 表单 user-selectable 默认值 | `src/southplus/api/constants.py::DEFAULT_LOGIN_TYPE / DEFAULT_HIDE_ID / DEFAULT_COOKIE_TTL`（同时是 `LoginRequest` 字段默认） |
+| 表单 hidden 字段默认值 | `src/southplus/api/constants.py::DEFAULT_FORM_FORWARD / DEFAULT_FORM_STEP / DEFAULT_FORM_SUBMIT`（被 `SouthPlusLoginAttempt.submit` 消费） |
+| 登录请求模型 | `src/southplus/models.py::LoginRequest`（字段名与 phpwind 表单 1:1 映射） |
+| 登录结果模型 | `src/southplus/models.py::LoginResult / CaptchaPayload` |
+| 端点工厂 | `src/southplus/models.py::build_endpoints`——把用户配置补齐为 `SouthPlusEndpoints`；`config_manager` 仅负责把配置喂进去 |
+| 登录字段映射（构造 POST body） | `src/southplus/api/login.py::SouthPlusLoginAttempt.submit` |
+| 登录成功 cookie 后缀 | `src/southplus/api/constants.py::LOGIN_COOKIE_NAME_SUFFIXES`（被 `_has_phpwind_login_cookie` 消费） |
+| 失败关键字表 | `src/southplus/api/constants.py::FAILURE_KEYWORDS`（顺序 = 优先级；被 `_classify_failure` 消费） |
+| 登录态 URL/正文判定 | `src/southplus/api/login.py::_looks_login_page` |
+| 验证码字节合法性 | `src/southplus/api/login.py::SouthPlusLoginAttempt.fetch_captcha` |
+| cookie 域过滤 | `src/southplus/client.py::_cookie_header` + `SouthPlusEndpoints.cookie_domains` |
 | 用户可配项 | `_conf_schema.json` 中的 `southplus_*` / `site_base_url` / `user_agent` 字段——只声明 schema，**不写抓包默认值**；空值由 `build_endpoints` 兜底 |
 
-每次修改 `src/api/`：
+每次修改 `src/southplus/api/`：
 
 1. 同步更新本文档"当前抓包结果"小节。
 2. 同步更新本文档顶部 **Capture 日期**（哪怕只是落点重命名也要更新——日期反映"文档与代码状态的对齐时间戳"）。

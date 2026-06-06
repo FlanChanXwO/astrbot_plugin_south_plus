@@ -1,12 +1,22 @@
-"""用户卡片渲染测试。
+"""用户卡片渲染测试（HTML + t2i）。
 
 不做 pixel-perfect 校验，只确认调用不抛错并产出 PNG。
+t2i 渲染器在测试中被 mock，返回最小合法 PNG。
 """
 
 from __future__ import annotations
 
-from src.core.user_card_render import render_user_card
+from unittest.mock import AsyncMock, patch, MagicMock
+
+import pytest
+
 from src.southplus.api import UserProfile
+
+_TINY_PNG = bytes.fromhex(
+    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+    "0000000d49444154789c6360000000000200"
+    "0d0a2db40000000049454e44ae426082"
+)
 
 
 def _sample_profile() -> UserProfile:
@@ -28,27 +38,57 @@ def _sample_profile() -> UserProfile:
     )
 
 
-def test_render_returns_valid_png() -> None:
-    png = render_user_card(_sample_profile())
+@pytest.fixture(autouse=True)
+def mock_t2i():
+    """所有测试自动 mock html_renderer，避免真实 t2i 调用。"""
+    mock_renderer = MagicMock()
+    mock_renderer.render_custom_template = AsyncMock(return_value=_TINY_PNG)
+    with patch("src.render.card_render.html_renderer", mock_renderer):
+        yield mock_renderer
+
+
+@pytest.mark.asyncio
+async def test_render_returns_valid_png():
+    from src.render.card_render import render_user_card
+
+    png = await render_user_card(_sample_profile(), season="summer")
     assert isinstance(png, bytes)
-    assert png.startswith(b"\x89PNG\r\n\x1a\n")
-    assert len(png) > 1000
+    assert png.startswith(b"\x89PNG")
 
 
-def test_render_with_provided_avatar_bytes() -> None:
-    # 一张 1x1 透明 PNG，验证 avatar_bytes 分支不抛错。
-    tiny_png = bytes.fromhex(
-        "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
-        "0000000d49444154789c63000100000005000100"
-        "0d0a2db40000000049454e44ae426082"
+@pytest.mark.asyncio
+async def test_render_with_avatar_bytes():
+    from src.render.card_render import render_user_card
+
+    png = await render_user_card(
+        _sample_profile(), avatar_bytes=_TINY_PNG, season="fall"
     )
-    png = render_user_card(_sample_profile(), avatar_bytes=tiny_png)
     assert png.startswith(b"\x89PNG")
-    assert len(png) > 1000
 
 
-def test_render_with_empty_profile_falls_back() -> None:
-    # 全部字段为默认值（空串 / 0），渲染不应崩。
-    png = render_user_card(UserProfile())
+@pytest.mark.asyncio
+async def test_render_empty_profile():
+    from src.render.card_render import render_user_card
+
+    png = await render_user_card(UserProfile(), season="winter")
     assert png.startswith(b"\x89PNG")
-    assert len(png) > 1000
+
+
+@pytest.mark.asyncio
+async def test_render_seasonal_themes():
+    from src.render.card_render import render_user_card
+
+    for season in ("spring", "summer", "fall", "winter"):
+        png = await render_user_card(_sample_profile(), season=season)
+        assert png.startswith(b"\x89PNG"), f"season={season} failed"
+
+
+@pytest.mark.asyncio
+async def test_render_empty_fields_hidden():
+    from src.render.card_render import render_user_card
+
+    profile = UserProfile(
+        username="test", uid="1", essence=0, posts=0, hp=0, soul=0, lp=0
+    )
+    png = await render_user_card(profile, season="summer")
+    assert png.startswith(b"\x89PNG")

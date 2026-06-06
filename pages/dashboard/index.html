@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>South Plus 管理面板</title>
+    <link rel="stylesheet" href="./css/dashboard.css" />
+  </head>
+  <body>
+    <div id="app" class="app-shell">
+      <aside class="sidebar" aria-label="South Plus 管理导航">
+        <div class="brand">
+          <div class="brand-title">South Plus</div>
+          <div class="brand-subtitle">Dashboard</div>
+        </div>
+        <nav class="nav-list" id="nav-list"></nav>
+      </aside>
+      <main class="main">
+        <header class="page-header">
+          <div>
+            <h1 id="page-title">概览</h1>
+            <p id="page-subtitle">数据库状态与近期签到概况</p>
+          </div>
+          <button id="refresh-button" class="icon-button" type="button" title="刷新" aria-label="刷新">↻</button>
+        </header>
+        <section id="overview" class="overview-grid" hidden></section>
+        <section id="toolbar" class="toolbar" hidden></section>
+        <section id="table-panel" class="table-panel" hidden>
+          <div class="table-wrap">
+            <table>
+              <thead id="table-head"></thead>
+              <tbody id="table-body"></tbody>
+            </table>
+          </div>
+          <div id="empty-state" class="empty-state" hidden>暂无数据</div>
+        </section>
+      </main>
+    </div>
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>South Plus 登录</title>
+  <style>
+    :root {
+      --sp-text: #1f2937;
+      --sp-muted: #5b6b7c;
+      --sp-border: #cfd8e3;
+    }
+    body.season-spring {
+      --sp-primary: #e87a92;
+      --sp-primary-dark: #c45d75;
+      --sp-primary-light: #fef0f5;
+      --sp-gradient: linear-gradient(180deg, #fef0f5 0%, #f5fff0 60%);
+      --sp-shadow: rgba(232, 122, 146, 0.12);
+    }
+    body.season-summer {
+      --sp-primary: #4a9eff;
+      --sp-primary-dark: #2f7fd9;
+      --sp-primary-light: #e8f4ff;
+      --sp-gradient: linear-gradient(180deg, #e8f4ff 0%, #ffffff 60%);
+      --sp-shadow: rgba(74, 158, 255, 0.12);
+    }
+    body.season-fall {
+      --sp-primary: #e88d4a;
+      --sp-primary-dark: #c46e2f;
+      --sp-primary-light: #fef5e8;
+      --sp-gradient: linear-gradient(180deg, #fef5e8 0%, #fefef5 60%);
+      --sp-shadow: rgba(232, 141, 74, 0.12);
+    }
+    body.season-winter {
+      --sp-primary: #7ba9d4;
+      --sp-primary-dark: #5a8bb5;
+      --sp-primary-light: #eef5fa;
+      --sp-gradient: linear-gradient(180deg, #eef5fa 0%, #ffffff 60%);
+      --sp-shadow: rgba(123, 169, 212, 0.12);
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      margin: 0;
+      padding: 2rem 1rem;
+      color: var(--sp-text);
+      background: var(--sp-gradient);
+      min-height: 100vh;
+    }
+    main {
+      max-width: 460px;
+      margin: 0 auto;
+      background: #ffffff;
+      border: 1px solid var(--sp-border);
+      border-radius: 14px;
+      padding: 24px 28px 28px;
+      box-shadow: 0 6px 20px var(--sp-shadow);
+      text-align: center;
+    }
+    .brand {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 18px;
+    }
+    .brand img {
+      max-width: 240px;
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+    p {
+      color: var(--sp-muted);
+      line-height: 1.7;
+      margin: 14px 0 0;
+    }
+    @media (max-width: 520px) {
+      body { padding: 0.75rem 0.5rem; }
+      main { padding: 16px 16px 20px; border-radius: 12px; box-shadow: none; }
+      .brand img { max-width: 180px; }
+    }
+  </style>
+</head>
+<body class="season-$season">
+  <main>
+    <div class="brand">
+      <img src="/assets/$logo_filename" alt="South Plus">
+    </div>
+    <p>$message</p>
+  </main>
+</body>
+</html>

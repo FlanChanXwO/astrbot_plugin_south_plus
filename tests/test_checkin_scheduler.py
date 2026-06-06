@@ -16,7 +16,7 @@ from src.core.checkin_scheduler import (
     _format_global_report,
     _is_failed,
 )
-from src.core.datamodels import UserRow
+from src.core.datamodels import ScheduleRow, UserRow
 from src.core.tasks.base import TaskResult
 from src.southplus.models import CheckinStatus
 
@@ -63,6 +63,7 @@ def _make_scheduler(
     user_store: MagicMock | None = None,
     checkin_store: MagicMock | None = None,
     schedule_store: MagicMock | None = None,
+    exclusion_store: MagicMock | None = None,
 ) -> CheckinScheduler:
     service = MagicMock()
     ustore = user_store or MagicMock()
@@ -76,6 +77,27 @@ def _make_scheduler(
         checkin_store=cstore,
         schedule_store=sstore,
         send_message=send_message,
+        exclusion_store=exclusion_store,
+    )
+
+
+def _make_schedule(
+    *,
+    id: int = 1,
+    umo: str = "umo1",
+    task_key: str = "sp.checkin.all",
+    params_json: str = '{"mode":"all"}',
+    enabled: bool = True,
+) -> ScheduleRow:
+    return ScheduleRow(
+        id=id,
+        umo=umo,
+        task_key=task_key,
+        cron="0 8 * * *",
+        params_json=params_json,
+        enabled=enabled,
+        created_at="2026-06-06",
+        updated_at="2026-06-06",
     )
 
 
@@ -188,6 +210,88 @@ class TestRunAllCheckins:
             text = await scheduler.run_all_checkins()
         assert "日签" in text
         assert "周签" in text
+
+
+class TestSessionExclusion:
+    @pytest.mark.asyncio
+    async def test_all_mode_skips_excluded_uid_for_current_session(self) -> None:
+        users = [
+            _make_user(sp_uid="uid-1", account="u1"),
+            _make_user(sp_uid="uid-2", account="u2"),
+        ]
+        ustore = MagicMock()
+        ustore.list_all.return_value = users
+        sstore = MagicMock()
+        sstore.list_by_umo.return_value = [
+            _make_schedule(umo="umo1", task_key="sp.checkin.all")
+        ]
+        estore = MagicMock()
+        estore.list_uids.return_value = {"uid-2"}
+        scheduler = _make_scheduler(
+            user_store=ustore,
+            schedule_store=sstore,
+            exclusion_store=estore,
+        )
+
+        with (
+            patch.object(
+                scheduler, "_checkin_user", new_callable=AsyncMock
+            ) as mock_checkin,
+            patch.object(
+                scheduler, "_push_report", new_callable=AsyncMock
+            ) as mock_push,
+        ):
+            mock_checkin.return_value = _make_per_user_result(sp_uid="uid-1")
+            await scheduler._tick_for_key("umo1", "sp.checkin.all")
+
+        assert [call.args[0].sp_uid for call in mock_checkin.await_args_list] == [
+            "uid-1"
+        ]
+        estore.list_uids.assert_called_once_with("umo1")
+        mock_push.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_session_mode_skips_excluded_active_uid(self) -> None:
+        user = _make_user(sp_uid="uid-1", account="u1")
+        ustore = MagicMock()
+        ustore.list_all.return_value = [user]
+        sstore = MagicMock()
+        sstore.list_by_umo.return_value = [
+            _make_schedule(
+                umo="umo1",
+                task_key="sp.checkin.session",
+                params_json='{"mode":"session","account":"u1"}',
+            )
+        ]
+        estore = MagicMock()
+        estore.list_uids.return_value = {"uid-1"}
+        scheduler = _make_scheduler(
+            user_store=ustore,
+            schedule_store=sstore,
+            exclusion_store=estore,
+        )
+
+        with (
+            patch.object(
+                scheduler, "_checkin_user", new_callable=AsyncMock
+            ) as mock_checkin,
+            patch.object(
+                scheduler, "_push_report", new_callable=AsyncMock
+            ) as mock_push,
+        ):
+            await scheduler._tick_for_key("umo1", "sp.checkin.session")
+
+        mock_checkin.assert_not_called()
+        mock_push.assert_not_called()
+
+    def test_refresh_checkin_jobs_rebuilds_both_checkin_jobs(self) -> None:
+        scheduler = _make_scheduler()
+        with patch.object(scheduler, "_ensure_job_for") as mock_ensure:
+            scheduler.refresh_checkin_jobs("umo1")
+        assert [call.args for call in mock_ensure.call_args_list] == [
+            ("umo1", "sp.checkin.all"),
+            ("umo1", "sp.checkin.session"),
+        ]
 
 
 # ---------------------------------------------------------------------------

@@ -27,6 +27,7 @@ from ..southplus.models import CheckinStatus
 from ..utils import current_iso_week, current_local_date
 from ..utils.logger import plugin_logger
 from .datamodels import UserRow
+from .db.checkin_session_exclusion_store import CheckinSessionExclusionStore
 from .db.checkin_store import CheckinStore
 from .db.schedule_store import ScheduleStore
 from .db.user_store import UserStore
@@ -54,11 +55,13 @@ class CheckinScheduler:
         checkin_store: CheckinStore,
         schedule_store: ScheduleStore,
         send_message: SendMessageFunc,
+        exclusion_store: CheckinSessionExclusionStore | None = None,
     ) -> None:
         self._checkin_service = checkin_service
         self._user_store = user_store
         self._checkin_store = checkin_store
         self._schedule_store = schedule_store
+        self._exclusion_store = exclusion_store
         self._send_message = send_message
         self._scheduler: AsyncIOScheduler | None = None
         self._semaphore: asyncio.Semaphore | None = None
@@ -100,6 +103,15 @@ class CheckinScheduler:
         plugin_logger.info(
             f"签到 cron 已批量更新为 {cron}，影响 {len(affected_umos)} 个会话。"
         )
+
+    def refresh_job(self, umo: str, task_key: str) -> None:
+        """公开刷新单个聚合 job，供 Dashboard 管理调度后重建运行态。"""
+        self._ensure_job_for(umo, task_key)
+
+    def refresh_checkin_jobs(self, umo: str) -> None:
+        """刷新当前会话下两个签到聚合 job，供会话级排除变更后调用。"""
+        for task_key in ("sp.checkin.all", "sp.checkin.session"):
+            self._ensure_job_for(umo, task_key)
 
     # ------------------------------------------------------------------
     # 订阅管理（持久化到 schedule 表）
@@ -184,7 +196,8 @@ class CheckinScheduler:
         """
         if self._scheduler is None:
             return
-        if task_key not in TASK_REGISTRY:
+        # sp.checkin.* 有专用执行路径，不经过 TASK_REGISTRY
+        if not task_key.startswith("sp.checkin.") and task_key not in TASK_REGISTRY:
             return
 
         job_id = _job_id_for_key(umo, task_key)
@@ -221,10 +234,14 @@ class CheckinScheduler:
 
     async def _tick_for_key(self, umo: str, task_key: str) -> None:
         """单个 (umo, task_key) 聚合触发。"""
-        task_cls = TASK_REGISTRY.get(task_key)
-        if task_cls is None:
-            plugin_logger.warning(f"未知 task_key，跳过：{task_key}")
-            return
+        # sp.checkin.* 有专用执行路径，不查 TASK_REGISTRY
+        is_checkin = task_key.startswith("sp.checkin.")
+        task_cls = None
+        if not is_checkin:
+            task_cls = TASK_REGISTRY.get(task_key)
+            if task_cls is None:
+                plugin_logger.warning(f"未知 task_key，跳过：{task_key}")
+                return
 
         # 收集所有 enabled 订阅
         rows = self._schedule_store.list_by_umo(umo)
@@ -236,6 +253,11 @@ class CheckinScheduler:
         seen_uids: set[str] = set()
         users: list[UserRow] = []
         has_all_mode = False
+        excluded_uids = (
+            self._exclusion_store.list_uids(umo)
+            if is_checkin and self._exclusion_store
+            else set()
+        )
 
         for row in matching:
             params = json.loads(row.params_json) if row.params_json else {}
@@ -246,13 +268,22 @@ class CheckinScheduler:
                 account = params.get("account", "")
                 if account:
                     active = self._get_active_for_account(account)
-                    if active and active.sp_uid not in seen_uids:
+                    if (
+                        active
+                        and active.auto_checkin
+                        and active.sp_uid not in excluded_uids
+                        and active.sp_uid not in seen_uids
+                    ):
                         seen_uids.add(active.sp_uid)
                         users.append(active)
 
         if has_all_mode:
             for u in self._user_store.list_all():
-                if u.sp_uid not in seen_uids:
+                if (
+                    u.sp_uid not in seen_uids
+                    and u.sp_uid not in excluded_uids
+                    and u.auto_checkin
+                ):
                     seen_uids.add(u.sp_uid)
                     users.append(u)
 
@@ -263,9 +294,10 @@ class CheckinScheduler:
         # 批量签到（Semaphore 并发控制）
         # 签到类任务同时跑日签+周签，其余走单任务
         semaphore = self._semaphore or asyncio.Semaphore(3)
-        if task_key.startswith("sp.checkin."):
+        if is_checkin:
             per_user_tasks = [self._checkin_user(user, semaphore) for user in users]
         else:
+            assert task_cls is not None
             per_user_tasks = [
                 self._run_task_for_user(user, task_cls, {}, semaphore) for user in users
             ]

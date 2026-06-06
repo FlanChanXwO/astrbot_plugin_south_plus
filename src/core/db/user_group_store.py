@@ -8,6 +8,7 @@ from __future__ import annotations
 import threading
 from pathlib import Path
 
+from ..datamodels import UserGroupRow
 from ._connection import connect as _db_connect
 
 
@@ -63,6 +64,24 @@ class UserGroupStore:
                 "SELECT sp_uid FROM user_group WHERE group_id = ?", (group_id,)
             ).fetchall()
         return [row["sp_uid"] for row in rows]
+
+    def list_all(self) -> list[UserGroupRow]:
+        """列出全部用户-群观测关系，供管理面 join 展示。"""
+        with self._lock, _db_connect(self.db_path) as conn:
+            rows = conn.execute(
+                "SELECT * FROM user_group ORDER BY last_seen_at DESC, id DESC"
+            ).fetchall()
+        return [
+            UserGroupRow(
+                id=row["id"],
+                sp_uid=row["sp_uid"],
+                group_id=row["group_id"],
+                last_seen_at=row["last_seen_at"],
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+            )
+            for row in rows
+        ]
 
     def delete_by_user(self, sp_uid: str) -> None:
         with self._lock, _db_connect(self.db_path) as conn:

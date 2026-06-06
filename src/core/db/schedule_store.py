@@ -97,6 +97,20 @@ class ScheduleStore:
             ).fetchall()
         return [_row_to_schedule(r) for r in rows]
 
+    def list_all(self) -> list[ScheduleRow]:
+        """列出全部调度订阅，供管理面查看与筛选。"""
+        with self._lock, _db_connect(self.db_path) as conn:
+            rows = conn.execute(
+                "SELECT * FROM schedule ORDER BY updated_at DESC, id DESC"
+            ).fetchall()
+        return [_row_to_schedule(r) for r in rows]
+
+    def get_by_id(self, id: int) -> ScheduleRow | None:
+        """按主键读取调度订阅。"""
+        with self._lock, _db_connect(self.db_path) as conn:
+            row = conn.execute("SELECT * FROM schedule WHERE id = ?", (id,)).fetchone()
+        return _row_to_schedule(row) if row else None
+
     def set_enabled(self, id: int, enabled: bool) -> None:
         with self._lock, _db_connect(self.db_path) as conn:
             conn.execute(
@@ -104,6 +118,13 @@ class ScheduleStore:
                 (int(enabled), _stamp(), id),
             )
             conn.commit()
+
+    def delete_by_id(self, id: int) -> bool:
+        """按主键删除调度订阅。返回 True 表示确有行被删除。"""
+        with self._lock, _db_connect(self.db_path) as conn:
+            cursor = conn.execute("DELETE FROM schedule WHERE id = ?", (id,))
+            conn.commit()
+        return cursor.rowcount > 0
 
     def batch_update_cron(self, *, task_key_prefix: str, new_cron: str) -> list[str]:
         """更新所有匹配前缀的订阅 cron。返回受影响的 umo 列表。

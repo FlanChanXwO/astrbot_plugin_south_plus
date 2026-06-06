@@ -6,20 +6,44 @@
   <title>South Plus 登录 - 页面不存在</title>
   <style>
     :root {
-      --sp-blue: #4a90e2;
-      --sp-blue-dark: #2f6fbf;
-      --sp-blue-soft: #6699cc;
-      --sp-blue-light: #e8f1fb;
       --sp-text: #1f2937;
       --sp-muted: #5b6b7c;
       --sp-border: #cfd8e3;
+    }
+    body.season-spring {
+      --sp-primary: #e87a92;
+      --sp-primary-dark: #c45d75;
+      --sp-primary-light: #fef0f5;
+      --sp-gradient: linear-gradient(180deg, #fef0f5 0%, #f5fff0 60%);
+      --sp-shadow: rgba(232, 122, 146, 0.12);
+    }
+    body.season-summer {
+      --sp-primary: #4a9eff;
+      --sp-primary-dark: #2f7fd9;
+      --sp-primary-light: #e8f4ff;
+      --sp-gradient: linear-gradient(180deg, #e8f4ff 0%, #ffffff 60%);
+      --sp-shadow: rgba(74, 158, 255, 0.12);
+    }
+    body.season-fall {
+      --sp-primary: #e88d4a;
+      --sp-primary-dark: #c46e2f;
+      --sp-primary-light: #fef5e8;
+      --sp-gradient: linear-gradient(180deg, #fef5e8 0%, #fefef5 60%);
+      --sp-shadow: rgba(232, 141, 74, 0.12);
+    }
+    body.season-winter {
+      --sp-primary: #7ba9d4;
+      --sp-primary-dark: #5a8bb5;
+      --sp-primary-light: #eef5fa;
+      --sp-gradient: linear-gradient(180deg, #eef5fa 0%, #ffffff 60%);
+      --sp-shadow: rgba(123, 169, 212, 0.12);
     }
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
       margin: 0;
       padding: 2rem 1rem;
       color: var(--sp-text);
-      background: linear-gradient(180deg, var(--sp-blue-light) 0%, #ffffff 60%);
+      background: var(--sp-gradient);
       min-height: 100vh;
     }
     main {
@@ -29,7 +53,7 @@
       border: 1px solid var(--sp-border);
       border-radius: 14px;
       padding: 24px 28px 28px;
-      box-shadow: 0 6px 20px rgba(74, 144, 226, 0.12);
+      box-shadow: 0 6px 20px var(--sp-shadow);
       text-align: center;
     }
     .brand {
@@ -45,17 +69,10 @@
       height: auto;
       display: block;
     }
-    h1 {
-      font-size: 1.25rem;
-      margin: 4px 0 0;
-      color: var(--sp-blue-dark);
-      font-weight: 600;
-      letter-spacing: 0.5px;
-    }
     .code {
       font-size: 3rem;
       font-weight: 700;
-      color: var(--sp-blue);
+      color: var(--sp-primary);
       margin: 14px 0 0;
       letter-spacing: 2px;
     }
@@ -70,13 +87,17 @@
       line-height: 1.7;
       margin: 12px 0 0;
     }
+    @media (max-width: 520px) {
+      body { padding: 0.75rem 0.5rem; }
+      main { padding: 16px 16px 20px; border-radius: 12px; box-shadow: none; }
+      .brand img { max-width: 180px; }
+    }
   </style>
 </head>
-<body>
+<body class="season-$season">
   <main>
     <div class="brand">
-      <img src="/assets/logo.png" alt="South Plus">
-      <h1>South Plus 登录</h1>
+      <img src="/assets/$logo_filename" alt="South Plus">
     </div>
     <div class="code">404</div>
     <div class="title">页面不存在</div>

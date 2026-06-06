@@ -36,6 +36,7 @@ class UserStore:
                     platform     TEXT NOT NULL,
                     cookie       TEXT NOT NULL DEFAULT '',
                     is_active    INTEGER NOT NULL DEFAULT 0,
+                    auto_checkin INTEGER NOT NULL DEFAULT 1,
                     created_at   TEXT NOT NULL,
                     updated_at   TEXT NOT NULL
                 )
@@ -197,6 +198,16 @@ class UserStore:
             conn.commit()
         return True
 
+    def set_auto_checkin(self, sp_uid: str, enabled: bool) -> bool:
+        """设置指定 UID 的自动签到开关。返回 True 表示找到并更新。"""
+        with self._lock, _db_connect(self.db_path) as conn:
+            cursor = conn.execute(
+                'UPDATE "user" SET auto_checkin = ?, updated_at = ? WHERE sp_uid = ?',
+                (int(enabled), _stamp(), sp_uid),
+            )
+            conn.commit()
+        return cursor.rowcount > 0
+
     # ------------------------------------------------------------------
     # 清理
     # ------------------------------------------------------------------
@@ -232,6 +243,9 @@ class UserStore:
             is_active=bool(row["is_active"]),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
+            auto_checkin=bool(row["auto_checkin"])
+            if "auto_checkin" in row.keys()
+            else True,
         )
 
 

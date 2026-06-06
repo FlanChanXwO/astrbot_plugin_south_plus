@@ -15,3 +15,4 @@ data/
 .playwright-mcp/
 AGENTS.md
 CLAUDE.md
+/tests/output/

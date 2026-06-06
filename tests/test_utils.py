@@ -1,16 +1,34 @@
 from __future__ import annotations
 
+import datetime
+from dataclasses import replace
+
 import pytest
 
+from src.core.datamodels import AddAccountResult, AddAccountStatus, UserRow
+from src.southplus.api import CheckinStatus, CheckinTaskResult, UserProfile
 from src.utils import (
     decrypt_secret,
     derive_cookie_domains_from_url,
     encrypt_secret,
+    format_add_account_result,
+    format_checkin_response,
     generate_token,
+    get_event_platform,
+    is_aiocqhttp_event,
     join_url,
     mask_secret,
     parse_cookie_domains,
+    season_name,
 )
+
+
+class _Event:
+    def __init__(self, platform: str | None) -> None:
+        self._platform = platform
+
+    def get_platform_name(self) -> str | None:
+        return self._platform
 
 
 def test_encrypt_roundtrip() -> None:
@@ -71,3 +89,100 @@ def test_generate_token_has_high_entropy() -> None:
     tokens = {generate_token() for _ in range(50)}
     assert len(tokens) == 50
     assert all(len(t) >= 40 for t in tokens)
+
+
+def test_get_event_platform_normalizes_blank_values() -> None:
+    assert get_event_platform(_Event(" aiocqhttp ")) == "aiocqhttp"
+    assert get_event_platform(_Event(None)) == ""
+
+
+def test_is_aiocqhttp_event_detects_onebot_platform() -> None:
+    assert is_aiocqhttp_event(_Event("aiocqhttp"))
+    assert is_aiocqhttp_event(_Event("napcat-aiocqhttp"))
+    assert not is_aiocqhttp_event(_Event("telegram"))
+
+
+def test_format_add_account_result_created_with_hint() -> None:
+    result = _add_result(AddAccountStatus.CREATED)
+    text = format_add_account_result(
+        result,
+        UserProfile(username="alice", uid="10001"),
+        auto_checkin_hint=True,
+    )
+    assert "登录成功：用户名：alice，id：10001" in text
+    assert "/spautocheckin off" in text
+
+
+def test_format_add_account_result_refreshed_and_owned_by_other() -> None:
+    refreshed = format_add_account_result(
+        _add_result(AddAccountStatus.REFRESHED),
+        UserProfile(username="", uid=""),
+    )
+    assert "已刷新 Cookie" in refreshed
+    assert "(未记录)" in refreshed
+    assert "uid-1" in refreshed
+
+    owned = format_add_account_result(
+        _add_result(AddAccountStatus.OWNED_BY_OTHER),
+        UserProfile(username="alice", uid="10001"),
+    )
+    assert "已被其他用户绑定" in owned
+    assert "10001" in owned
+
+
+def test_format_checkin_response_covers_cache_success_done_and_failed() -> None:
+    text = format_checkin_response(
+        uid="10001",
+        today="2026-06-06",
+        this_week_label="2026-W23",
+        fresh_daily=None,
+        fresh_weekly=CheckinTaskResult(
+            status=CheckinStatus.SUCCESS,
+            message="OK",
+        ),
+    )
+    assert "日签（2026-06-06，缓存）: 已签到" in text
+    assert "周签（2026-W23，新签）: 成功，OK" in text
+
+    text = format_checkin_response(
+        uid="10001",
+        today="2026-06-06",
+        this_week_label="2026-W23",
+        fresh_daily=CheckinTaskResult(
+            status=CheckinStatus.ALREADY_DONE,
+            message="already",
+        ),
+        fresh_weekly=CheckinTaskResult(
+            status=CheckinStatus.FAILED,
+            message="",
+            error="boom",
+        ),
+    )
+    assert "日签（2026-06-06，新签）: 已签到，already" in text
+    assert "周签（2026-W23，新签）: 失败，boom" in text
+
+
+def test_season_name_boundaries() -> None:
+    assert season_name(datetime.datetime(2026, 1, 1)) == "winter"
+    assert season_name(datetime.datetime(2026, 3, 1)) == "spring"
+    assert season_name(datetime.datetime(2026, 6, 1)) == "summer"
+    assert season_name(datetime.datetime(2026, 9, 1)) == "fall"
+
+
+def _add_result(status: AddAccountStatus) -> AddAccountResult:
+    return AddAccountResult(
+        status=status,
+        account=replace(_user_row(), sp_uid="uid-1"),
+    )
+
+
+def _user_row() -> UserRow:
+    return UserRow(
+        sp_uid="uid-1",
+        account="account-1",
+        platform="aiocqhttp",
+        cookie="cookie",
+        is_active=True,
+        created_at="2026-06-06T00:00:00",
+        updated_at="2026-06-06T00:00:00",
+    )

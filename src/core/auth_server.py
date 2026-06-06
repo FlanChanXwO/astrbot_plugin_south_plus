@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 import html
 import json
 import re
@@ -40,6 +41,48 @@ _ASSET_MIME = {
     ".jpeg": "image/jpeg",
     ".svg": "image/svg+xml",
 }
+
+# 资源目录（用于季节 logo 等来自南+站点的素材）。
+_RESOURCES_DIR = Path(__file__).resolve().parents[2] / "resources"
+
+# 季节站点 logo 文件名映射。
+_SEASONAL_LOGOS: dict[str, str] = {
+    "winter": "logo-winter5.png",  # 12 月 — 2 月
+    "spring": "logo-spring-south.png",  # 3 月 — 5 月
+    "summer": "logo-s-summer2.png",  # 6 月 — 8 月
+    "fall": "logo-fall4.png",  # 9 月 — 11 月
+}
+
+
+def _seasonal_logo(now: datetime.datetime | None = None) -> str:
+    """根据当前月份返回对应的季节 logo 文件名。
+
+    参数 ``now`` 可选，传入固定时间用于测试；不传时用系统时间。
+    """
+    if now is None:
+        now = datetime.datetime.now()
+    month = now.month
+    if month in (12, 1, 2):
+        return _SEASONAL_LOGOS["winter"]
+    if month in (3, 4, 5):
+        return _SEASONAL_LOGOS["spring"]
+    if month in (6, 7, 8):
+        return _SEASONAL_LOGOS["summer"]
+    return _SEASONAL_LOGOS["fall"]
+
+
+def _season_name(now: datetime.datetime | None = None) -> str:
+    """返回当前季节的英文名，用于 ``<body class="season-...">``。"""
+    if now is None:
+        now = datetime.datetime.now()
+    month = now.month
+    if month in (12, 1, 2):
+        return "winter"
+    if month in (3, 4, 5):
+        return "spring"
+    if month in (6, 7, 8):
+        return "summer"
+    return "fall"
 
 
 def _render(template_name: str, **mapping: str) -> str:
@@ -251,7 +294,7 @@ class CredentialFormServer:
         return True, "登录成功，Cookie 已保存。可以关闭此页面。"
 
     def handle_asset(self, filename: str) -> tuple[bytes, str] | None:
-        """读取 assets/ 下的静态文件，拒绝路径穿越。"""
+        """读取 assets/ 下的静态文件，找不到时回退到 resources/。拒绝路径穿越。"""
         # 防御路径穿越：解码后再二次校验。
         try:
             decoded = unquote(filename)
@@ -259,14 +302,16 @@ class CredentialFormServer:
             return None
         if not decoded or not _ASSET_NAME_OK.match(decoded):
             return None
-        target = (_ASSETS_DIR / decoded).resolve()
-        try:
-            target.relative_to(_ASSETS_DIR.resolve())
-        except ValueError:
-            return None
-        if not target.is_file():
-            return None
-        return target.read_bytes(), _asset_mime(decoded)
+
+        for base_dir in (_ASSETS_DIR, _RESOURCES_DIR):
+            target = (base_dir / decoded).resolve()
+            try:
+                target.relative_to(base_dir.resolve())
+            except ValueError:
+                continue
+            if target.is_file():
+                return target.read_bytes(), _asset_mime(decoded)
+        return None
 
     def _make_handler(self) -> type[BaseHTTPRequestHandler]:
         outer = self
@@ -281,11 +326,23 @@ class CredentialFormServer:
                 if kind == "login":
                     entry = outer._peek_entry(value)
                     if not entry:
-                        self._send_html(HTTPStatus.GONE, _render("expired.html"))
+                        self._send_html(
+                            HTTPStatus.GONE,
+                            _render(
+                                "expired.html",
+                                logo_filename=_seasonal_logo(),
+                                season=_season_name(),
+                            ),
+                        )
                         return
                     self._send_html(
                         HTTPStatus.OK,
-                        _render("login.html", token=html.escape(value, quote=True)),
+                        _render(
+                            "login.html",
+                            token=html.escape(value, quote=True),
+                            logo_filename=_seasonal_logo(),
+                            season=_season_name(),
+                        ),
                     )
                     return
                 if kind == "captcha":
@@ -314,12 +371,26 @@ class CredentialFormServer:
                 if kind == "asset":
                     asset = outer.handle_asset(value)
                     if not asset:
-                        self._send_html(HTTPStatus.NOT_FOUND, _render("404.html"))
+                        self._send_html(
+                            HTTPStatus.NOT_FOUND,
+                            _render(
+                                "404.html",
+                                logo_filename=_seasonal_logo(),
+                                season=_season_name(),
+                            ),
+                        )
                         return
                     body, content_type = asset
                     self._send_bytes(HTTPStatus.OK, content_type, body)
                     return
-                self._send_html(HTTPStatus.NOT_FOUND, _render("404.html"))
+                self._send_html(
+                    HTTPStatus.NOT_FOUND,
+                    _render(
+                        "404.html",
+                        logo_filename=_seasonal_logo(),
+                        season=_season_name(),
+                    ),
+                )
 
             def do_POST(self) -> None:
                 kind, value = _route(self.path)
@@ -349,7 +420,14 @@ class CredentialFormServer:
                         HTTPStatus.OK, {"ok": True, "message": "已取消登录。"}
                     )
                     return
-                self._send_html(HTTPStatus.NOT_FOUND, _render("404.html"))
+                self._send_html(
+                    HTTPStatus.NOT_FOUND,
+                    _render(
+                        "404.html",
+                        logo_filename=_seasonal_logo(),
+                        season=_season_name(),
+                    ),
+                )
 
             def _read_body(self) -> bytes:
                 try:

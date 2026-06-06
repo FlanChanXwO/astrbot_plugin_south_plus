@@ -1,13 +1,11 @@
-"""根据 ``UserProfile`` 渲染一张 PNG 用户资料卡片。
+"""根据 ``UserProfile`` 渲染一张浅色卡片风格 PNG 用户资料卡片。
 
-设计目标：
-
-* 同步函数（Pillow 是同步库），调用方决定要不要 ``run_in_executor``。
-* 字体回落链：``assets/font.ttc`` (本仓库可选) -> macOS PingFang/STHeiti ->
-  Arial Unicode -> ``PIL.ImageFont.load_default()``（中文可能渲染成 □）。
-* 头像加载策略：``avatar_bytes`` -> 网络拉 ``profile.avatar_url`` -> 占位
-  （纯色圆 + 用户名首字母）。
-* 字段排列参考用户提供的 profile 截图：左侧大头像 + 右侧两列字段网格。
+设计：
+* 浅色季节渐变背景 + 白色圆角卡片居中
+* 上方居中头像 / 用户名 / UID / 个性签名
+* 中部 HP/SP币/魄 横向统计条（左标签右数值，垂直堆叠）
+* 下方单列字段网格，空值自动隐藏
+* 右上角 logo 水印（低调半透明，无底衬）
 """
 
 from __future__ import annotations
@@ -21,30 +19,67 @@ from PIL import Image, ImageDraw, ImageFont
 
 from ..southplus.api import UserProfile
 
-# --- 颜色与尺寸常量 ----------------------------------------------------------
+# --- 尺寸常量 ----------------------------------------------------------------
 
-_CANVAS_W, _CANVAS_H = 920, 480
-_PADDING = 32
-_AVATAR_BOX = 260  # 圆形头像直径
-_LOGO_BOX = 64
+_CANVAS_W, _CANVAS_H = 400, 670
+_CARD_X, _CARD_Y = 20, 40
+_CARD_W, _CARD_H = 360, 590
+_CARD_RADIUS = 12
 
-_COLOR_BG = (255, 255, 255)
-_COLOR_BORDER = (220, 226, 230)
-_COLOR_USERNAME = (37, 99, 235)  # #2563eb
-_COLOR_UID_GRAY = (130, 138, 150)
-_COLOR_LABEL = (130, 138, 150)
-_COLOR_VALUE = (24, 24, 27)
-_COLOR_SIGNATURE = (90, 90, 100)
-_COLOR_AVATAR_FALLBACK_BG = (200, 220, 255)
-_COLOR_AVATAR_FALLBACK_FG = (37, 99, 235)
-_COLOR_CARD_SHADOW = (200, 207, 215)
+_AVATAR_BOX = 100
+_LOGO_SIZE = 28
 
-# 字体候选列表，按优先级 try。Path 是绝对路径，避免 cwd 漂移。
+# --- 四季浅色配色 ------------------------------------------------------------
+
+_SEASON_THEMES: dict[str, dict] = {
+    "spring": {
+        "gradient_top": (254, 240, 245),  # #fef0f5
+        "gradient_btm": (245, 255, 240),  # #f5fff0
+        "accent": (232, 122, 146),  # 樱花粉
+        "accent_dim": (200, 100, 120),
+        "text": (31, 41, 55),
+        "text_dim": (107, 114, 128),
+        "shadow": (232, 122, 146, 30),
+    },
+    "summer": {
+        "gradient_top": (232, 244, 255),  # #e8f4ff
+        "gradient_btm": (255, 255, 255),  # #ffffff
+        "accent": (74, 158, 255),  # 天蓝
+        "accent_dim": (50, 110, 190),
+        "text": (31, 41, 55),
+        "text_dim": (107, 114, 128),
+        "shadow": (74, 158, 255, 30),
+    },
+    "fall": {
+        "gradient_top": (254, 245, 232),  # #fef5e8
+        "gradient_btm": (254, 254, 245),  # #fefef5
+        "accent": (232, 141, 74),  # 枫橙
+        "accent_dim": (180, 105, 50),
+        "text": (31, 41, 55),
+        "text_dim": (107, 114, 128),
+        "shadow": (232, 141, 74, 30),
+    },
+    "winter": {
+        "gradient_top": (238, 245, 250),  # #eef5fa
+        "gradient_btm": (255, 255, 255),  # #ffffff
+        "accent": (123, 169, 212),  # 冰蓝
+        "accent_dim": (85, 120, 155),
+        "text": (31, 41, 55),
+        "text_dim": (107, 114, 128),
+        "shadow": (123, 169, 212, 30),
+    },
+}
+
+# 属性数值块配色
+_STAT_BLOCK_STYLES: dict[str, dict] = {
+    "HP": {"bg": (254, 226, 226), "value_color": (220, 38, 38), "icon": "♥"},
+    "SP币": {"bg": (254, 243, 199), "value_color": (217, 119, 6), "icon": "●"},
+    "魄": {"bg": (243, 232, 255), "value_color": (147, 51, 234), "icon": "◆"},
+}
+
+# 字体候选列表
 _FONT_CANDIDATES: tuple[str, ...] = (
-    # 项目自带（仓库放进来时会用到，缺失则跳过）。
     "assets/font.ttc",
-    # macOS 系统字体。PingFang 是首选中文字体，但在新版 macOS 上可能
-    # 不在公开路径里（被打成 .ttc 移到 AssetsV2）；逐个 try。
     "/System/Library/Fonts/PingFang.ttc",
     "/Library/Fonts/Arial Unicode.ttf",
     "/System/Library/Fonts/STHeiti Medium.ttc",
@@ -55,13 +90,18 @@ _FONT_CANDIDATES: tuple[str, ...] = (
 
 @dataclass(slots=True)
 class _FontSet:
-    title: ImageFont.ImageFont
     username: ImageFont.ImageFont
     uid: ImageFont.ImageFont
-    label: ImageFont.ImageFont
-    value: ImageFont.ImageFont
-    small: ImageFont.ImageFont
+    signature: ImageFont.ImageFont
+    stat_value: ImageFont.ImageFont
+    stat_label: ImageFont.ImageFont
+    text: ImageFont.ImageFont
     avatar_letter: ImageFont.ImageFont
+
+
+# ---------------------------------------------------------------------------
+# 公开入口
+# ---------------------------------------------------------------------------
 
 
 def render_user_card(
@@ -69,162 +109,123 @@ def render_user_card(
     *,
     avatar_bytes: bytes | None = None,
     logo_path: Path | None = None,
+    season: str = "summer",
 ) -> bytes:
-    """渲染用户资料卡片，返回 PNG 字节串。
-
-    渲染始终成功——网络/字体/头像任何一步失败都会回落到占位实现。
-    """
-
-    canvas = Image.new("RGB", (_CANVAS_W, _CANVAS_H), _COLOR_BG)
-    draw = ImageDraw.Draw(canvas)
-
-    # 外框：圆角矩形描边。
-    draw.rounded_rectangle(
-        (4, 4, _CANVAS_W - 4, _CANVAS_H - 4),
-        radius=18,
-        outline=_COLOR_BORDER,
-        width=2,
-    )
-
+    """渲染用户资料卡片，返回 PNG 字节串。``season`` 取值 spring/summer/fall/winter。"""
+    theme = _SEASON_THEMES.get(season, _SEASON_THEMES["summer"])
     fonts = _load_fonts()
 
+    canvas = Image.new("RGBA", (_CANVAS_W, _CANVAS_H), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(canvas)
+
+    # 1) 浅色季节渐变背景
+    _draw_background(draw, theme)
+
+    # 2) 白色圆角卡片（带阴影效果）
+    card_rect = (_CARD_X, _CARD_Y, _CARD_X + _CARD_W, _CARD_Y + _CARD_H)
+    draw.rounded_rectangle(card_rect, radius=_CARD_RADIUS, fill=(255, 255, 255))
+    # 卡片描边
+    a = theme["accent"]
+    draw.rounded_rectangle(
+        card_rect, radius=_CARD_RADIUS, outline=(a[0], a[1], a[2], 50), width=1
+    )
+
+    cx = _CARD_X + _CARD_W // 2
+
+    # 3) 右上角 logo
+    _draw_logo(canvas, logo_path, card_rect, theme)
+
+    # 4) 居中头像
     avatar_img = _load_avatar(profile, avatar_bytes)
-    avatar_x = _PADDING
-    avatar_y = (_CANVAS_H - _AVATAR_BOX) // 2
-    _paste_circular(canvas, avatar_img, (avatar_x, avatar_y), _AVATAR_BOX)
+    av_y = _CARD_Y + 32
+    _paste_avatar(canvas, draw, avatar_img, cx, av_y, theme)
 
-    # 右侧布局起点。
-    right_x = avatar_x + _AVATAR_BOX + _PADDING
-    cursor_y = _PADDING
+    # 5) 居中用户名 / UID / 签名
+    header_top = av_y + _AVATAR_BOX + 14
+    cy = _draw_centered_header(draw, profile, cx, header_top, theme, fonts)
 
-    # 用户名 + UID。
-    username_text = profile.username or "(未知用户)"
-    draw.text(
-        (right_x, cursor_y),
-        username_text,
-        fill=_COLOR_USERNAME,
-        font=fonts.username,
-    )
-    username_w = _text_width(draw, username_text, fonts.username)
-    uid_text = f"  (数字ID: {profile.uid or '-'})"
-    draw.text(
-        (right_x + username_w, cursor_y + 8),
-        uid_text,
-        fill=_COLOR_UID_GRAY,
-        font=fonts.uid,
-    )
-    cursor_y += 44
+    # 6) 居中属性数值块
+    block_y = cy + 20
+    grid_y = _draw_stat_blocks(draw, profile, cx, block_y, fonts)
 
-    # 个性签名。
-    signature = profile.signature or "您还没有设置个性签名"
-    draw.text(
-        (right_x, cursor_y),
-        _truncate(signature, 38),
-        fill=_COLOR_SIGNATURE,
-        font=fonts.small,
-    )
-    cursor_y += 36
-
-    # 字段网格：两列。
-    col_left: list[tuple[str, str]] = [
-        ("精华", str(profile.essence)),
-        ("发帖", str(profile.posts)),
-        ("HP", str(profile.hp)),
-        ("魄", str(profile.soul)),
-        ("SP币", profile.sp_coin or "-"),
-        ("LP", str(profile.lp)),
-    ]
-    col_right: list[tuple[str, str]] = [
-        ("会员头衔", profile.title or "-"),
-        ("在线时间", profile.online_hours or "-"),
-        ("注册时间", profile.register_date or "-"),
-        ("最后登录", profile.last_login_date or "-"),
-    ]
-
-    row_h = 36
-    col1_x = right_x
-    col2_x = right_x + 240
-    label_value_gap = 64
-
-    grid_top = cursor_y
-    for i, (label, value) in enumerate(col_left):
-        y = grid_top + i * row_h
-        draw.text((col1_x, y), label, fill=_COLOR_LABEL, font=fonts.label)
-        draw.text(
-            (col1_x + label_value_gap, y),
-            _truncate(value, 16),
-            fill=_COLOR_VALUE,
-            font=fonts.value,
-        )
-    for i, (label, value) in enumerate(col_right):
-        y = grid_top + i * row_h
-        draw.text((col2_x, y), label, fill=_COLOR_LABEL, font=fonts.label)
-        draw.text(
-            (col2_x + label_value_gap + 12, y),
-            _truncate(value, 16),
-            fill=_COLOR_VALUE,
-            font=fonts.value,
-        )
-
-    _paste_logo(canvas, logo_path)
+    # 7) 文本网格
+    grid_y = grid_y + 14
+    _draw_text_grid(draw, profile, cx, grid_y, theme, fonts)
 
     buf = io.BytesIO()
     canvas.save(buf, format="PNG", optimize=True)
     return buf.getvalue()
 
 
-# --- 字体 -------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# 背景
+# ---------------------------------------------------------------------------
 
 
-def _load_fonts() -> _FontSet:
-    font_path = _find_font()
-    if font_path is None:
-        default = ImageFont.load_default()
-        # PIL 默认字体不支持中文 -> 中文会渲染成 □。这是预期回落。
-        return _FontSet(
-            title=default,
-            username=default,
-            uid=default,
-            label=default,
-            value=default,
-            small=default,
-            avatar_letter=default,
+def _draw_background(draw: ImageDraw.ImageDraw, theme: dict) -> None:
+    top = theme["gradient_top"]
+    btm = theme["gradient_btm"]
+    for y in range(_CANVAS_H):
+        r = y / _CANVAS_H
+        draw.line(
+            (0, y, _CANVAS_W, y),
+            fill=(
+                int(top[0] + (btm[0] - top[0]) * r),
+                int(top[1] + (btm[1] - top[1]) * r),
+                int(top[2] + (btm[2] - top[2]) * r),
+            ),
         )
+
+
+# ---------------------------------------------------------------------------
+# Logo
+# ---------------------------------------------------------------------------
+
+
+def _draw_logo(
+    canvas: Image.Image,
+    logo_path: Path | None,
+    card_rect: tuple[int, int, int, int],
+    theme: dict,
+) -> None:
+    logo_img = _load_logo_image(logo_path)
+    if logo_img is None:
+        return
+    lx = card_rect[2] - 16 - logo_img.size[0]
+    ly = card_rect[1] + 14
+    # 降低不透明度，作为低调水印
+    logo_img = _fade_image(logo_img, 40)
+    canvas.paste(logo_img, (lx, ly), logo_img)
+
+
+def _load_logo_image(logo_path: Path | None) -> Image.Image | None:
+    if logo_path is None:
+        plugin_root = Path(__file__).resolve().parents[2]
+        candidate = plugin_root / "assets" / "logo.png"
+        if candidate.exists():
+            logo_path = candidate
+    if logo_path is None or not logo_path.exists():
+        return None
     try:
-        return _FontSet(
-            title=ImageFont.truetype(font_path, 28),
-            username=ImageFont.truetype(font_path, 30),
-            uid=ImageFont.truetype(font_path, 18),
-            label=ImageFont.truetype(font_path, 18),
-            value=ImageFont.truetype(font_path, 20),
-            small=ImageFont.truetype(font_path, 18),
-            avatar_letter=ImageFont.truetype(font_path, 96),
-        )
-    except OSError:
-        default = ImageFont.load_default()
-        return _FontSet(
-            title=default,
-            username=default,
-            uid=default,
-            label=default,
-            value=default,
-            small=default,
-            avatar_letter=default,
-        )
+        logo = Image.open(logo_path).convert("RGBA")
+        # 南+ logo 原图白底不透明，去除白色像素使其可在任何底色上叠加。
+        data = logo.getdata()
+        new_data = []
+        for r, g, b, a in data:
+            if r > 240 and g > 240 and b > 240:
+                new_data.append((r, g, b, 0))
+            else:
+                new_data.append((r, g, b, a))
+        logo.putdata(new_data)
+        logo.thumbnail((_LOGO_SIZE, _LOGO_SIZE), Image.LANCZOS)
+        return logo
+    except Exception:
+        return None
 
 
-def _find_font() -> str | None:
-    plugin_root = Path(__file__).resolve().parents[2]
-    for candidate in _FONT_CANDIDATES:
-        path = Path(candidate)
-        if not path.is_absolute():
-            path = plugin_root / candidate
-        if path.exists() and path.is_file():
-            return str(path)
-    return None
-
-
-# --- 头像 -------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# 头像
+# ---------------------------------------------------------------------------
 
 
 def _load_avatar(profile: UserProfile, avatar_bytes: bytes | None) -> Image.Image:
@@ -236,16 +237,17 @@ def _load_avatar(profile: UserProfile, avatar_bytes: bytes | None) -> Image.Imag
     if profile.avatar_url:
         try:
             with httpx.Client(timeout=8.0) as client:
-                response = client.get(profile.avatar_url)
-                if response.status_code == 200 and response.content:
-                    return Image.open(io.BytesIO(response.content)).convert("RGBA")
+                resp = client.get(profile.avatar_url)
+                if resp.status_code == 200 and resp.content:
+                    return Image.open(io.BytesIO(resp.content)).convert("RGBA")
         except Exception:
             pass
     return _placeholder_avatar(profile.username or "?")
 
 
 def _placeholder_avatar(text: str) -> Image.Image:
-    img = Image.new("RGBA", (_AVATAR_BOX, _AVATAR_BOX), _COLOR_AVATAR_FALLBACK_BG)
+    box = _AVATAR_BOX
+    img = Image.new("RGBA", (box, box), (200, 220, 255, 255))
     draw = ImageDraw.Draw(img)
     letter = (text[:1] or "?").upper()
     fonts = _load_fonts()
@@ -254,75 +256,290 @@ def _placeholder_avatar(text: str) -> Image.Image:
         w = bbox[2] - bbox[0]
         h = bbox[3] - bbox[1]
     except Exception:
-        w, h = (40, 60)
+        w, h = 40, 60
     draw.text(
-        ((_AVATAR_BOX - w) // 2, (_AVATAR_BOX - h) // 2 - 8),
+        ((box - w) // 2, (box - h) // 2 - 6),
         letter,
-        fill=_COLOR_AVATAR_FALLBACK_FG,
+        fill=(37, 99, 235, 255),
         font=fonts.avatar_letter,
     )
     return img
 
 
-def _paste_circular(
+def _paste_avatar(
     canvas: Image.Image,
+    draw: ImageDraw.ImageDraw,
     src: Image.Image,
-    pos: tuple[int, int],
-    box: int,
+    cx: int,
+    y: int,
+    theme: dict,
 ) -> None:
+    box = _AVATAR_BOX
+    x = cx - box // 2
+
     src = src.convert("RGBA")
-    # 等比缩放裁中。
     src_w, src_h = src.size
     scale = max(box / src_w, box / src_h)
-    new_w, new_h = (int(src_w * scale), int(src_h * scale))
-    src = src.resize((new_w, new_h), Image.LANCZOS)
-    left = (new_w - box) // 2
-    top = (new_h - box) // 2
-    src = src.crop((left, top, left + box, top + box))
+    nw, nh = int(src_w * scale), int(src_h * scale)
+    src = src.resize((nw, nh), Image.LANCZOS)
+    left = (nw - box) // 2
+    top_pad = (nh - box) // 2
+    src = src.crop((left, top_pad, left + box, top_pad + box))
 
     mask = Image.new("L", (box, box), 0)
     ImageDraw.Draw(mask).ellipse((0, 0, box, box), fill=255)
+    canvas.paste(src, (x, y), mask)
 
-    canvas.paste(src, pos, mask)
-
-    # 头像描边。
-    draw = ImageDraw.Draw(canvas)
+    a = theme["accent"]
+    # 季节色描边
+    draw.ellipse((x, y, x + box, y + box), outline=(a[0], a[1], a[2], 180), width=3)
+    # 外发光
     draw.ellipse(
-        (pos[0], pos[1], pos[0] + box, pos[1] + box),
-        outline=_COLOR_CARD_SHADOW,
-        width=2,
+        (x - 2, y - 2, x + box + 2, y + box + 2),
+        outline=(a[0], a[1], a[2], 60),
+        width=4,
     )
 
 
-def _paste_logo(canvas: Image.Image, logo_path: Path | None) -> None:
-    if logo_path is None:
-        plugin_root = Path(__file__).resolve().parents[2]
-        candidate = plugin_root / "assets" / "logo.png"
-        if candidate.exists():
-            logo_path = candidate
-    if logo_path is None or not logo_path.exists():
-        return
-    try:
-        logo = Image.open(logo_path).convert("RGBA")
-    except Exception:
-        return
-    logo.thumbnail((_LOGO_BOX, _LOGO_BOX), Image.LANCZOS)
-    canvas.paste(
-        logo,
-        (_CANVAS_W - _PADDING - logo.size[0], _CANVAS_H - _PADDING - logo.size[1]),
-        logo,
-    )
+# ---------------------------------------------------------------------------
+# 居中用户名 / UID / 签名
+# ---------------------------------------------------------------------------
 
 
-# --- 文本工具 ---------------------------------------------------------------
+def _draw_centered_header(
+    draw: ImageDraw.ImageDraw,
+    profile: UserProfile,
+    cx: int,
+    y: int,
+    theme: dict,
+    fonts: _FontSet,
+) -> int:
+    text_color = theme["text"]
+    dim = theme["text_dim"]
+    ac = theme["accent"]
+
+    username = profile.username or "(未知用户)"
+    _draw_centered_text(draw, username, cx, y, fonts.username, text_color)
+    y += 38
+
+    uid = f"数字ID: {profile.uid or '-'}"
+    _draw_centered_text(draw, uid, cx, y, fonts.uid, dim)
+    y += 26
+
+    sig = profile.signature
+    if sig:
+        _draw_centered_text(draw, _truncate(sig, 40), cx, y, fonts.signature, dim)
+        draw.line(
+            (cx - 80, y + 20, cx + 80, y + 20), fill=(ac[0], ac[1], ac[2], 30), width=1
+        )
+        y += 34
+    else:
+        draw.line(
+            (cx - 80, y - 2, cx + 80, y - 2), fill=(ac[0], ac[1], ac[2], 30), width=1
+        )
+
+    return y
 
 
-def _text_width(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont) -> int:
+def _draw_centered_text(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    cx: int,
+    y: int,
+    font: ImageFont.ImageFont,
+    color: tuple[int, ...],
+) -> None:
     try:
         bbox = draw.textbbox((0, 0), text, font=font)
-        return bbox[2] - bbox[0]
+        tw = bbox[2] - bbox[0]
     except Exception:
-        return len(text) * 12
+        tw = len(text) * 14
+    draw.text((cx - tw // 2, y), text, fill=color, font=font)
+
+
+# ---------------------------------------------------------------------------
+# 属性数值块
+# ---------------------------------------------------------------------------
+
+
+def _draw_stat_blocks(
+    draw: ImageDraw.ImageDraw,
+    profile: UserProfile,
+    cx: int,
+    y: int,
+    fonts: _FontSet,
+) -> int:
+    """绘制垂直堆叠的横向统计条，返回后续内容的 y 坐标。"""
+    bar_w = _CARD_W - 40  # 320
+    bar_h = 32
+    gap = 6
+    sx = cx - bar_w // 2
+
+    items: list[tuple[str, int | str]] = [
+        ("HP", profile.hp),
+        ("SP币", profile.sp_coin or "-"),
+        ("魄", profile.soul),
+    ]
+    visible = [(label, str(v)) for label, v in items if _is_empty_stat(v)]
+
+    cur_y = y
+    for label, value in visible:
+        s = _STAT_BLOCK_STYLES.get(label, {})
+        bg = s.get("bg", (240, 240, 240))
+        val_color = s.get("value_color", (60, 60, 60))
+
+        draw.rounded_rectangle(
+            (sx, cur_y, sx + bar_w, cur_y + bar_h), radius=8, fill=bg
+        )
+
+        draw.text(
+            (sx + 12, cur_y + 8), label, fill=(120, 120, 120), font=fonts.stat_label
+        )
+        # 数值右对齐
+        try:
+            vbbox = draw.textbbox((0, 0), value, font=fonts.stat_value)
+            vw = vbbox[2] - vbbox[0]
+        except Exception:
+            vw = len(value) * 14
+        draw.text(
+            (sx + bar_w - 12 - vw, cur_y + 5),
+            value,
+            fill=val_color,
+            font=fonts.stat_value,
+        )
+
+        cur_y += bar_h + gap
+
+    return cur_y - gap if visible else y
+
+
+# ---------------------------------------------------------------------------
+# 文本字段网格
+# ---------------------------------------------------------------------------
+
+
+def _draw_text_grid(
+    draw: ImageDraw.ImageDraw,
+    profile: UserProfile,
+    cx: int,
+    y: int,
+    theme: dict,
+    fonts: _FontSet,
+) -> None:
+    dim = theme["text_dim"]
+    ac = theme["accent"]
+
+    rows: list[tuple[str, str]] = [
+        ("精华", str(profile.essence)),
+        ("发帖", str(profile.posts)),
+        ("LP", str(profile.lp)),
+        ("会员头衔", profile.title or "-"),
+        ("在线时间", profile.online_hours or "-"),
+        ("注册时间", profile.register_date or "-"),
+        ("最后登录", profile.last_login_date or "-"),
+    ]
+
+    def _empty(v: str) -> bool:
+        return v in ("", "0", "-", "None", "0 小时")
+
+    # 分隔线
+    draw.line((cx - 90, y - 6, cx + 90, y - 6), fill=(ac[0], ac[1], ac[2], 30), width=1)
+
+    col_lx = cx - 90
+    row_h = 26
+    bar_w = _CARD_W - 40  # 320
+
+    ry = y
+    for label, value in rows:
+        if _empty(value):
+            continue
+        # 标签左对齐
+        draw.text((col_lx, ry), label, fill=dim, font=fonts.text)
+        # 数值右对齐
+        try:
+            vbbox = draw.textbbox((0, 0), value, font=fonts.text)
+            vw = vbbox[2] - vbbox[0]
+        except Exception:
+            vw = len(value) * 12
+        draw.text((col_lx + bar_w - vw, ry), value, fill=dim, font=fonts.text)
+        ry += row_h
+
+
+# ---------------------------------------------------------------------------
+# 字体
+# ---------------------------------------------------------------------------
+
+
+def _load_fonts() -> _FontSet:
+    fp = _find_font()
+    if fp is None:
+        d = ImageFont.load_default()
+        return _FontSet(
+            username=d,
+            uid=d,
+            signature=d,
+            stat_value=d,
+            stat_label=d,
+            text=d,
+            avatar_letter=d,
+        )
+    try:
+        return _FontSet(
+            username=ImageFont.truetype(fp, 28),
+            uid=ImageFont.truetype(fp, 16),
+            signature=ImageFont.truetype(fp, 15),
+            stat_value=ImageFont.truetype(fp, 22),
+            stat_label=ImageFont.truetype(fp, 13),
+            text=ImageFont.truetype(fp, 15),
+            avatar_letter=ImageFont.truetype(fp, 80),
+        )
+    except OSError:
+        d = ImageFont.load_default()
+        return _FontSet(
+            username=d,
+            uid=d,
+            signature=d,
+            stat_value=d,
+            stat_label=d,
+            text=d,
+            avatar_letter=d,
+        )
+
+
+def _find_font() -> str | None:
+    root = Path(__file__).resolve().parents[2]
+    for c in _FONT_CANDIDATES:
+        p = Path(c)
+        if not p.is_absolute():
+            p = root / c
+        if p.exists() and p.is_file():
+            return str(p)
+    return None
+
+
+# ---------------------------------------------------------------------------
+# 工具
+# ---------------------------------------------------------------------------
+
+
+def _is_empty_stat(v: int | str | None) -> bool:
+    """统计值是否应视为空（隐藏），兼容 int 和 str 类型。"""
+    if v is None:
+        return False
+    if isinstance(v, int):
+        return v != 0
+    return v not in ("", "-", "0", "None")
+
+
+def _fade_image(img: Image.Image, alpha: int) -> Image.Image:
+    """将图像所有像素的 alpha 通道乘以给定比例（0-255）。"""
+    img = img.copy()
+    data = img.getdata()
+    new_data = []
+    for r, g, b, a in data:
+        new_data.append((r, g, b, (a * alpha) // 255))
+    img.putdata(new_data)
+    return img
 
 
 def _truncate(text: str, max_chars: int) -> str:
