@@ -48,12 +48,21 @@ def mock_t2i():
 
 
 @pytest.mark.asyncio
-async def test_render_returns_valid_png():
+async def test_render_returns_valid_png(mock_t2i):
     from src.render.card_render import render_user_card
 
     png = await render_user_card(_sample_profile(), season="summer")
     assert isinstance(png, bytes)
     assert png.startswith(b"\x89PNG")
+    mock_t2i.render_custom_template.assert_awaited_once()
+    _, _, kwargs = mock_t2i.render_custom_template.mock_calls[0]
+    assert kwargs["options"]["full_page"] is False
+    assert kwargs["options"]["clip"] == {
+        "x": 0,
+        "y": 0,
+        "width": 420,
+        "height": 661,
+    }
 
 
 @pytest.mark.asyncio
@@ -92,3 +101,41 @@ async def test_render_empty_fields_hidden():
     )
     png = await render_user_card(profile, season="summer")
     assert png.startswith(b"\x89PNG")
+
+
+@pytest.mark.asyncio
+async def test_render_empty_fields_uses_compact_clip(mock_t2i):
+    from src.render.card_render import render_user_card
+
+    profile = UserProfile(username="test", uid="1")
+    png = await render_user_card(profile, season="summer")
+
+    assert png.startswith(b"\x89PNG")
+    _, _, kwargs = mock_t2i.render_custom_template.mock_calls[-1]
+    assert kwargs["options"]["clip"]["height"] == 260
+
+
+@pytest.mark.asyncio
+async def test_render_screenshot_like_profile_clip(mock_t2i):
+    from src.render.card_render import render_user_card
+
+    profile = UserProfile(
+        username="flanchan",
+        uid="2030219",
+        sp_coin="20 G",
+        posts=1,
+        title="Lv.0",
+        online_hours="15 小时",
+        register_date="2024-03-09",
+        last_login_date="2026-06-06",
+    )
+    png = await render_user_card(profile, season="summer")
+
+    assert png.startswith(b"\x89PNG")
+    _, _, kwargs = mock_t2i.render_custom_template.mock_calls[-1]
+    assert kwargs["options"]["clip"] == {
+        "x": 0,
+        "y": 0,
+        "width": 420,
+        "height": 486,
+    }

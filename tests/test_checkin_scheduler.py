@@ -134,6 +134,33 @@ class TestLifecycle:
         assert scheduler._scheduler is not first
         scheduler.stop()
 
+    def test_reload_config_updates_checkin_cron_and_rebuilds_jobs(self) -> None:
+        sstore = MagicMock()
+        sstore.batch_update_cron.return_value = ["umo1"]
+        sstore.list_by_umo.return_value = [
+            _make_schedule(id=1, umo="umo1", task_key="sp.checkin.all"),
+            _make_schedule(id=2, umo="umo1", task_key="sp.checkin.session"),
+            _make_schedule(id=3, umo="umo1", task_key="custom.task"),
+            _make_schedule(
+                id=4, umo="umo1", task_key="sp.checkin.daily", enabled=False
+            ),
+        ]
+        scheduler = _make_scheduler(schedule_store=sstore)
+
+        with patch.object(scheduler, "_ensure_job_for") as mock_ensure:
+            scheduler.reload_config(cron="0 3 * * *", concurrency=5)
+
+        sstore.batch_update_cron.assert_called_once_with(
+            task_key_prefix="sp.checkin.",
+            new_cron="0 3 * * *",
+        )
+        assert scheduler._semaphore is not None
+        assert {call.args for call in mock_ensure.call_args_list} == {
+            ("umo1", "sp.checkin.all"),
+            ("umo1", "sp.checkin.session"),
+            ("umo1", "custom.task"),
+        }
+
 
 # ---------------------------------------------------------------------------
 # 订阅管理

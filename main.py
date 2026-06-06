@@ -103,6 +103,7 @@ class SouthPlusPlugin(Star):
             exclusion_store=self.checkin_exclusion_store,
             scheduler=self.scheduler,
         )
+        self._reload_runtime_config()
         if self.config_snapshot.auto_checkin_enabled:
             self.scheduler.start(
                 concurrency=self.config_snapshot.auto_checkin_concurrency,
@@ -596,6 +597,15 @@ class SouthPlusPlugin(Star):
         task = self._expiry_tasks.pop(token, None)
         if task:
             self._loop.call_soon_threadsafe(task.cancel)
+
+    def _reload_runtime_config(self) -> None:
+        """把当前配置同步到运行态调度器和持久化订阅。"""
+        self.config_manager = PluginConfigManager(self.config)
+        self.config_snapshot = self.config_manager.snapshot()
+        self.scheduler.reload_config(
+            cron=self.config_snapshot.auto_checkin_cron,
+            concurrency=self.config_snapshot.auto_checkin_concurrency,
+        )
 
     def _notify_from_thread(self, unified_msg_origin: str, text: str) -> None:
         self._loop.call_soon_threadsafe(

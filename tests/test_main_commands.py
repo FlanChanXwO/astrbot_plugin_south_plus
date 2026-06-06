@@ -154,3 +154,22 @@ def test_spcheckinallsub_registers_admin_command_and_alias() -> None:
         "alias": {"sp全局签到订阅"},
     }
     assert handler.__southplus_permission__ == PermissionType.ADMIN
+
+
+def test_reload_runtime_config_applies_current_checkin_time() -> None:
+    SouthPlusPlugin, _ = _load_plugin_class()
+    plugin = object.__new__(SouthPlusPlugin)
+    plugin.config = {
+        "auto_checkin": {
+            "auto_checkin_time": "03:00",
+            "auto_checkin_concurrency": 5,
+        },
+    }
+    plugin.scheduler = MagicMock()
+
+    plugin._reload_runtime_config()
+
+    plugin.scheduler.reload_config.assert_called_once_with(
+        cron="0 3 * * *",
+        concurrency=5,
+    )
