@@ -201,7 +201,7 @@ def _draw_logo(
 def _load_logo_image(logo_path: Path | None) -> Image.Image | None:
     if logo_path is None:
         plugin_root = Path(__file__).resolve().parents[2]
-        candidate = plugin_root / "assets" / "logo.png"
+        candidate = plugin_root / "resources" / "logo-spring-south.png"
         if candidate.exists():
             logo_path = candidate
     if logo_path is None or not logo_path.exists():

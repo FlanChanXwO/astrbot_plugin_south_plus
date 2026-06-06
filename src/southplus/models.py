@@ -111,7 +111,7 @@ class CheckinReport:
 class UserProfile:
     """South Plus 用户资料抓取结果。
 
-    字段来源于 ``profile.php`` 抓包截图——见 docs/southplus-capture.md。
+    字段来源于 ``profile.php`` 抓包截图——见 docs/dev/southplus-capture.md。
     解析失败的字段会以合理默认值返回（空串 / 0），不会为 None。
     """
 

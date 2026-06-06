@@ -30,7 +30,7 @@
   * ``daily_checkin.py`` ── ``SouthPlusDailyCheckinApi``
   * ``weekly_checkin.py`` ── ``SouthPlusWeeklyCheckinApi``
 
-抓包流程见 ``docs/southplus-capture.md``（含 Capture 日期约束）。
+抓包流程见 ``docs/dev/southplus-capture.md``（含 Capture 日期约束）。
 """
 
 from ..checkin_service import CheckinService

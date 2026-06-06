@@ -28,9 +28,10 @@ from ..utils.logger import plugin_logger
 
 LoginSuccessCallback = Callable[[CredentialSession, LoginRequest, LoginResult], None]
 
+_PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 # 模板与静态资源根目录（项目根 / templates、项目根 / assets）。
-_TEMPLATE_DIR = Path(__file__).resolve().parents[2] / "templates"
-_ASSETS_DIR = Path(__file__).resolve().parents[2] / "assets"
+_TEMPLATE_DIR = _PLUGIN_ROOT / "templates"
+_ASSETS_DIR = _PLUGIN_ROOT / "assets"
 _TEMPLATE_CACHE: dict[str, Template] = {}
 _ASSET_NAME_OK = re.compile(r"^[A-Za-z0-9._-]+$")
 
@@ -43,7 +44,7 @@ _ASSET_MIME = {
 }
 
 # 资源目录（用于季节 logo 等来自南+站点的素材）。
-_RESOURCES_DIR = Path(__file__).resolve().parents[2] / "resources"
+_RESOURCES_DIR = _PLUGIN_ROOT / "resources"
 
 # 季节站点 logo 文件名映射。
 _SEASONAL_LOGOS: dict[str, str] = {
@@ -178,16 +179,18 @@ class CredentialFormServer:
         platform: str = "",
     ) -> CredentialSession:
         self.ensure_started()
-        token = generate_token()
-        session = CredentialSession(
-            token=token,
-            user_key=user_key,
-            unified_msg_origin=unified_msg_origin,
-            platform=platform,
-            expires_at=expires_at_after(self.config.token_ttl_seconds),
-        )
-        entry = _LoginEntry(session=session)
         with self._lock:
+            token = generate_token()
+            while token in self._entries:
+                token = generate_token()
+            session = CredentialSession(
+                token=token,
+                user_key=user_key,
+                unified_msg_origin=unified_msg_origin,
+                platform=platform,
+                expires_at=expires_at_after(self.config.token_ttl_seconds),
+            )
+            entry = _LoginEntry(session=session)
             self._entries[token] = entry
         return session
 

@@ -11,7 +11,7 @@
 - **语言**: Python 3.10+
 - **框架**: AstrBot plugin system
 - **架构**: 简单分层（非 DDD）
-- **许可证**: MIT
+- **许可证**: AGPL-3.0
 
 主要目录：
 
@@ -36,8 +36,8 @@ assets/                    静态资源（logo 等）
 - 任何改动前先看：`docs/dev/maintenance.md`
 - 业务背景：`docs/project/README.md`
 - 数据库表与 Dashboard 语义：`docs/project/README.md`
-- South Plus 逆向边界：`docs/southplus-capture.md`
-- 安全边界：`docs/security.md`
+- South Plus 逆向边界：`docs/dev/southplus-capture.md`
+- 安全边界：`docs/dev/security.md`
 
 ## 技能
 
@@ -46,7 +46,7 @@ assets/                    静态资源（logo 等）
 ## 硬约束
 
 - `src/southplus/api/` 是唯一对外层；实现模块禁止被 `src/core/` 或 `main.py` 直接 import
-- 逆向常量只能放 `src/southplus/`；触碰任何文件必须更新 `docs/southplus-capture.md` Capture 日期
+- 逆向常量只能放 `src/southplus/`；触碰任何文件必须更新 `docs/dev/southplus-capture.md` Capture 日期
 - `main.py` 只接 AstrBot 命令注册，不放业务逻辑
 - 账号密码只在单次请求内存中一次性使用，不落库、不打日志
 - 新 db schema 变化通过新增 `V{N+1}` 脚本追加，不修改已有迁移脚本

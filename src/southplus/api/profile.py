@@ -1,6 +1,6 @@
 """South Plus 用户资料抓取与解析。
 
-实现根据 ``docs/southplus-capture.md`` 中的 profile.php 截图字段而来。
+实现根据 ``docs/dev/southplus-capture.md`` 中的 profile.php 截图字段而来。
 注意：截图来自 ``bbs.south-plus.org/profile.php``（主域 ``www.south-plus.net``
 的 profile 路径布局不同），故本模块硬编码 ``bbs.south-plus.org`` 入口而不复用
 ``SouthPlusEndpoints.site_base_url``。

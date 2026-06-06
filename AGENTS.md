@@ -26,8 +26,8 @@ AstrBot 插件，非 DDD。主要目录：
 - 任何改动前先看：`docs/dev/maintenance.md`
 - 业务背景：`docs/project/README.md`
 - 数据库表与 Dashboard 语义：`docs/project/README.md`
-- South Plus 逆向边界：`docs/southplus-capture.md`
-- 安全边界：`docs/security.md`
+- South Plus 逆向边界：`docs/dev/southplus-capture.md`
+- 安全边界：`docs/dev/security.md`
 
 ## 硬约束
 
@@ -35,7 +35,7 @@ AstrBot 插件，非 DDD。主要目录：
 - 逆向常量（URL、表单字段、cookie 名、成功/失败判定）只能放 `src/southplus/`
 - `main.py` 只接 AstrBot 命令注册，不放业务逻辑
 - 账号密码只在单次请求内存中一次性使用，不落库、不打日志
-- 触碰 `src/southplus/` 任何文件必须更新 `docs/southplus-capture.md` 的 Capture 日期
+- 触碰 `src/southplus/` 任何文件必须更新 `docs/dev/southplus-capture.md` 的 Capture 日期
 - 新 db schema 变化通过新增 `V{N+1}` 脚本追加，不修改已有迁移脚本
 
 ## 文档纪律

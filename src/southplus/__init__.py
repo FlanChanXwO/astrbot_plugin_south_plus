@@ -28,5 +28,5 @@
 * ``checkin_service.py`` ── ``CheckinService`` 签到服务
 * ``models.py`` ── 数据模型与端点工厂
 
-抓包流程见 ``docs/southplus-capture.md``（含 Capture 日期约束）。
+抓包流程见 ``docs/dev/southplus-capture.md``（含 Capture 日期约束）。
 """

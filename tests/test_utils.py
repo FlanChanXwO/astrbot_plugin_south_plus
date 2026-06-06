@@ -85,10 +85,11 @@ def test_mask_secret_keeps_head_and_tail() -> None:
     assert mask_secret("") == ""
 
 
-def test_generate_token_has_high_entropy() -> None:
+def test_generate_token_uses_short_url_safe_code() -> None:
     tokens = {generate_token() for _ in range(50)}
     assert len(tokens) == 50
-    assert all(len(t) >= 40 for t in tokens)
+    assert all(len(t) == 6 for t in tokens)
+    assert all(t.isalnum() for t in tokens)
 
 
 def test_get_event_platform_normalizes_blank_values() -> None:

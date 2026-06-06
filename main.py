@@ -444,34 +444,6 @@ class SouthPlusPlugin(Star):
         else:
             yield event.plain_result("当前会话未订阅签到结果。")
 
-    @filter.command("spsubcheckinall", alias={"sp全体订阅"})
-    @filter.permission_type(PermissionType.ADMIN)
-    async def sp_sub_checkin_all(self, event: AstrMessageEvent):
-        """管理员：订阅全量签到结果推送（所有账号汇总）。"""
-        umo = event.unified_msg_origin
-        account = event.get_sender_id()
-        params = {"mode": "all", "account": account}
-        self.scheduler.subscribe(
-            umo,
-            task_key="sp.checkin.all",
-            cron=self.config_snapshot.auto_checkin_cron,
-            params=params,
-        )
-        yield event.plain_result("已订阅全量签到结果推送（所有账号汇总）。")
-
-    @filter.command("spunsubcheckinall", alias={"sp取消全体订阅"})
-    @filter.permission_type(PermissionType.ADMIN)
-    async def sp_unsub_checkin_all(self, event: AstrMessageEvent):
-        """管理员：取消全量签到结果推送订阅。"""
-        umo = event.unified_msg_origin
-        account = event.get_sender_id()
-        params = {"mode": "all", "account": account}
-        if self.scheduler.is_subscribed(umo, "sp.checkin.all", params):
-            self.scheduler.unsubscribe(umo, "sp.checkin.all", params)
-            yield event.plain_result("已取消全量签到结果订阅。")
-        else:
-            yield event.plain_result("当前会话未订阅全量签到结果。")
-
     @filter.command("spallcheckin", alias={"sp全体签到"})
     @filter.permission_type(PermissionType.ADMIN)
     async def sp_all_checkin(self, event: AstrMessageEvent):
@@ -515,7 +487,7 @@ class SouthPlusPlugin(Star):
     # 清理
     # ------------------------------------------------------------------
 
-    @filter.command("sp清理")
+    @filter.command("spcleanup", alias={"sp清理"})
     @filter.permission_type(PermissionType.ADMIN)
     async def sp_cleanup(self, event: AstrMessageEvent):
         """管理员：清理退群/非好友用户的绑定数据。"""

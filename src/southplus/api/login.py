@@ -1,7 +1,7 @@
 """South Plus 登录 HTTP 调用。
 
-实现根据 docs/southplus-capture.md 的"当前抓包结果"小节而来。修改前请先重新跑
-一遍 docs/southplus-capture.md 的抓包流程，确认改动只反映站点真实变化。
+实现根据 docs/dev/southplus-capture.md 的"当前抓包结果"小节而来。修改前请先重新跑
+一遍 docs/dev/southplus-capture.md 的抓包流程，确认改动只反映站点真实变化。
 """
 
 from __future__ import annotations

@@ -26,7 +26,7 @@
 
 ## South Plus 逆向约束
 
-- 触碰 `src/southplus/` 任何文件**必须**更新 `docs/southplus-capture.md` 的 Capture 日期。
+- 触碰 `src/southplus/` 任何文件**必须**更新 `docs/dev/southplus-capture.md` 的 Capture 日期。
 - 抓包结论变化时走"重新抓包 → 更新 Capture 日期 → 改 `src/southplus/`"流程，不得反向。
 
 ## 安全边界
@@ -34,7 +34,7 @@
 - 账号密码只在单次请求内存中驻留，不写入 SQLite，不写入日志。
 - Cookie 根据配置加密或明文写入 SQLite；`cookie_encryption_key` 留空时仅推荐本机调试。
 - 不得提交 Cookie、密码、SQLite 数据库、日志文件或 Dashboard 密钥。
-- 详细说明见 `docs/security.md`。
+- 详细说明见 `docs/dev/security.md`。
 
 ## 数据库迁移
 

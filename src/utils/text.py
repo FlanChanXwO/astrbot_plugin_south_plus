@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import secrets
+import string
+
+
+_LOGIN_TOKEN_ALPHABET = string.ascii_letters + string.digits
 
 
 def mask_secret(value: str, *, keep: int = 6) -> str:
@@ -14,5 +18,5 @@ def mask_secret(value: str, *, keep: int = 6) -> str:
 
 
 def generate_token() -> str:
-    # 32 字节 URL-safe token：抵抗猜测；链接只在 TTL 窗口内有效。
-    return secrets.token_urlsafe(32)
+    # 用户要求登录链接中的随机串固定为 6 个字符，缩短 URL 展示长度。
+    return "".join(secrets.choice(_LOGIN_TOKEN_ALPHABET) for _ in range(6))

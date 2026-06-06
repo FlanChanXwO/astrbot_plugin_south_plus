@@ -1,4 +1,14 @@
-# South Plus 插件维护文档
+# South Plus 插件文档索引
+
+## 文档导航
+
+| 文档 | 内容 |
+| --- | --- |
+| [project/README.md](./project/README.md) | 项目能力、架构分层、Dashboard 与数据库语义 |
+| [dev/README.md](./dev/README.md) | 开发维护文档子索引 |
+| [dev/maintenance.md](./dev/maintenance.md) | 维护规则、包边界、迁移规则、测试要求 |
+| [dev/security.md](./dev/security.md) | 安全边界与 Cookie 存储说明 |
+| [dev/southplus-capture.md](./dev/southplus-capture.md) | South Plus 抓包流程与逆向结论 |
 
 ## 结构
 
@@ -62,10 +72,10 @@ astrbot_plugin_south_plus/
 ├── pages/credentials/             # 旧入口，跳转到 dashboard
 ├── tests/                         # pytest 测试套件
 └── docs/                          # 维护文档
-    ├── index.md                   # 你正在看的文件
-    ├── security.md                # 安全边界
-    ├── southplus-capture.md       # South Plus 抓包流程与结论（含 Capture 日期约束）
+    ├── README.md                  # 你正在看的索引
     ├── dev/maintenance.md         # 维护规则、包边界、测试要求
+    ├── dev/security.md            # 安全边界
+    ├── dev/southplus-capture.md   # South Plus 抓包流程与结论（含 Capture 日期约束）
     └── project/README.md          # 业务概览与能力说明
 ```
 
@@ -73,7 +83,7 @@ astrbot_plugin_south_plus/
 
 | 包 / 模块 | 是否含抓包知识 | 改动触发的同步项 |
 | --- | --- | --- |
-| `src/southplus/` | **是** | 必须同步 `docs/southplus-capture.md`（含顶部 Capture 日期）与 `tests/conftest.py` 的 mock 行为 |
+| `src/southplus/` | **是** | 必须同步 `docs/dev/southplus-capture.md`（含顶部 Capture 日期）与 `tests/conftest.py` 的 mock 行为 |
 | `src/core/` | 否 | 仅本目录 + 相关测试 |
 | `src/web/` | 否 | HTTP server + Jinja2 模板 |
 | `src/pages/` | 否 | Plugin Pages Web API 后端 |
@@ -125,4 +135,4 @@ data/plugin_data/astrbot_plugin_south_plus/southplus.db
 
 ## 抓包结论速查
 
-完整抓包流程、端点、表单字段、cookie 行为、反爬、判定等详见 [`docs/southplus-capture.md`](./southplus-capture.md)。
+完整抓包流程、端点、表单字段、cookie 行为、反爬、判定等详见 [`docs/dev/southplus-capture.md`](./dev/southplus-capture.md)。

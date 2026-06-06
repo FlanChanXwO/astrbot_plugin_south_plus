@@ -2,11 +2,9 @@
 
 <div align="center">
 
-<img src="assets/logo.png" width="200" alt="south-plus"/>
+**支持社区签到、账号信息查询与定时签到的 SouthPlus AstrBot 插件**
 
-**South Plus 凭证与任务自动化 AstrBot 插件**
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 ![Python Version](https://img.shields.io/badge/Python-3.10%2B-blue)
 ![AstrBot](https://img.shields.io/badge/AstrBot-%E2%89%A54.24.0-green)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20MacOS-lightgrey)
@@ -15,18 +13,38 @@
 
 ## 项目简介
 
-`astrbot_plugin_south_plus` 为 AstrBot 提供 South Plus 社区凭证管理与自动签到能力。
+`astrbot_plugin_south_plus` 是面向 AstrBot 的 SouthPlus 插件，支持社区签到、账号信息查询，并可按配置开启定时签到。
 
 核心能力：
 
-- `/splogin` 生成一次性临时登录链接（默认有效 10 分钟），网页表单代理拉取站点验证码。
 - **多账号绑定**：同一聊天用户可绑定多个南+ UID，全局唯一持有约束。
-- `/spprofile` 渲染 HTML+t2i 资料卡片（头像、用户名、UID、14 项数值，季节配色）。
-- `/spcheckin` 日签（cid=15）+ 周签（cid=14），已签期直接复用本地记录。
-- `/spuidlist` / `/spswitch` / `/spdelete` — 多 UID 列表、切换、删除。
-- `/spbindcookie` — 直接用 Cookie 绑定。
+- 一次性临时登录链接（默认有效 10 分钟），网页表单代理拉取站点验证码。
+- HTML+t2i 资料卡片（头像、用户名、UID、14 项数值，季节配色）。
+- 日签+ 周签。
 - Dashboard Plugin Pages 管理员管理账号、群组、调度任务、用户-群关系与签到历史。
   - 调度页“参与账号”可按会话排除/恢复某个 UID 的自动签到，不影响其他会话或账号全局开关。
+
+## 命令速览
+
+| 英文命令 | 中文别名 | 权限 | 说明 |
+| --- | --- | --- | --- |
+| `splogin` | `sp登陆` | 普通用户 | 生成一次性网页登录链接，登录成功后新增或刷新 UID 绑定。 |
+| `spstatus` | `sp状态` | 普通用户 | 查看当前激活账号。 |
+| `spuidlist` | `spuid列表` | 普通用户 | 列出当前用户绑定的所有 UID。 |
+| `spswitch <uid>` | `sp切换 <uid>` | 普通用户 | 切换当前激活 UID。 |
+| `spdelete <uid>` | `sp删除 <uid>` | 普通用户 | 删除当前用户绑定的指定 UID。 |
+| `spbindcookie <cookie>` | `/sp绑定 <cookie>` | 普通用户 | 直接用 Cookie 绑定账号。 |
+| `spprofile` | `sp资料` | 普通用户 | 抓取当前激活账号资料并渲染卡片。 |
+| `spcheckin` | `sp签到` | 普通用户 | 对当前激活账号执行日签和周签。 |
+| `spautocheckin [on/off]` | `sp自动签到 [开启/关闭]` | 普通用户 | 查看或切换当前激活账号的自动签到开关。 |
+| `spsubcheckin` | `sp订阅签到` | 普通用户 | 订阅当前会话的当前账号签到结果推送。 |
+| `spunsubcheckin` | `sp取消签到` | 普通用户 | 取消当前会话的当前账号签到结果推送。 |
+| `spallcheckin` | `sp全体签到` | 管理员 | 立即执行全部绑定账号签到。 |
+| `spcleanup` | `sp清理` | 管理员 | 清理退群或非好友用户的绑定数据。 |
+
+## 免责声明
+
+本项目仅供学习使用，请勿用于商业用途。使用本插件视为同意提供用户凭据，用户凭据仅用于查询游戏数据。使用本插件造成的任何数据滥用行为与作者无关。
 
 ## 安装
 
@@ -47,9 +65,8 @@ git clone https://github.com/FlanChanXwO/astrbot_plugin_south_plus.git
 |------|------|
 | [开发与维护](docs/dev/maintenance.md) | 包边界、安全边界、文档纪律、迁移规则 |
 | [项目概览](docs/project/README.md) | 能力说明与架构分层 |
-| [South Plus 抓包](docs/southplus-capture.md) | 逆向记录与 Capture 日期约束 |
-| [安全说明](docs/security.md) | Cookie 存储、密钥、边界 |
-| [开发说明](docs/development.md) | 本地开发与调试 |
+| [South Plus 抓包](docs/dev/southplus-capture.md) | 逆向记录与 Capture 日期约束 |
+| [安全说明](docs/dev/security.md) | Cookie 存储、密钥、边界 |
 
 ## 关键配置
 
@@ -62,7 +79,7 @@ git clone https://github.com/FlanChanXwO/astrbot_plugin_south_plus.git
 | `cookie_encryption_key` | 空 | Cookie 加密 key；留空时明文存储（仅推荐本机调试）。 |
 | `user_agent` | 空 | 留空时使用内置 UA；反爬升级时可覆盖。 |
 
-> South Plus 站点本身的 URL、cookie 域、表单字段等抓包结论硬编码在 `src/southplus/api/constants.py`，不暴露给 Dashboard——改 South Plus 走"重新抓包 → 更新 `docs/southplus-capture.md` Capture 日期 → 改 `src/southplus/`"流程。
+> South Plus 站点本身的 URL、cookie 域、表单字段等抓包结论硬编码在 `src/southplus/api/constants.py`，不暴露给 Dashboard——改 South Plus 走"重新抓包 → 更新 `docs/dev/southplus-capture.md` Capture 日期 → 改 `src/southplus/`"流程。
 
 ## 临时登录链接
 
@@ -82,15 +99,6 @@ python -m pytest
 ruff check .
 ```
 
-重载插件（从 AstrBot runtime 根目录）：
+## 许可证
 
-```bash
-scripts/astrbot/reload-plugins.sh 6196 astrbot_plugin_south_plus
-```
-
-## 安全说明
-
-- 账号、密码只在单次请求驻留内存，不写入 SQLite，不打日志。
-- 登录链接使用随机 token，提交成功后立即失效。
-- `cookie_encryption_key` 配置后，SQLite 中的 Cookie 以加密格式存储；丢失 key 等同丢失 Cookie。
-- Dashboard Page 依赖 AstrBot Dashboard 鉴权，适合管理员管理账号与调度；页面只展示脱敏 Cookie，不提供密码或明文 Cookie 编辑入口。
+本项目使用 [GNU Affero General Public License v3.0](LICENSE)。

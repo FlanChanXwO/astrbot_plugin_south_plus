@@ -1,7 +1,7 @@
 """South Plus API 常量（抓包结论）。
 
 本文件是所有 API 相关常量的唯一权威来源。改动须同步
-``docs/southplus-capture.md`` 顶部的 ``Capture 日期`` 与"当前抓包结果"小节。
+``docs/dev/southplus-capture.md`` 顶部的 ``Capture 日期`` 与"当前抓包结果"小节。
 
 放置原则：
 
@@ -15,7 +15,7 @@ from __future__ import annotations
 
 # ---- 站点域名 ---------------------------------------------------------------
 
-# 主站：见 docs/southplus-capture.md 的"当前抓包结果 → 端点"。镜像如
+# 主站：见 docs/dev/southplus-capture.md 的"当前抓包结果 → 端点"。镜像如
 # bbs.south-plus.org 字段集一致但 cookie 前缀 hash 不同。
 DEFAULT_SITE_BASE_URL = "https://www.south-plus.net"
 
@@ -41,7 +41,7 @@ DEFAULT_HIDE_ID = "0"  # 0=显示在线 / 1=隐身登录
 DEFAULT_COOKIE_TTL = "31536000"  # 一年；可选 31536000/2592000/86400/3600/0
 
 # 用于通过 Cloudflare 的浏览器风格 UA。改 UA 时建议先在
-# docs/southplus-capture.md 步骤 1 复测一次连通性。
+# docs/dev/southplus-capture.md 步骤 1 复测一次连通性。
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "

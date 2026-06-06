@@ -30,8 +30,9 @@ LoginSuccessCallback = Callable[[CredentialSession, LoginRequest, LoginResult], 
 
 # HTML 模板目录（与本文件同级的 static/ 子目录）。
 _TEMPLATE_DIR = Path(__file__).resolve().parent / "static"
+_PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 # 静态资源和资源目录仍在插件根。
-_ASSETS_DIR = Path(__file__).resolve().parents[2] / "assets"
+_ASSETS_DIR = _PLUGIN_ROOT / "assets"
 _TEMPLATE_CACHE: dict[str, Template] = {}
 _ASSET_NAME_OK = re.compile(r"^[A-Za-z0-9._-]+$")
 
@@ -44,7 +45,7 @@ _ASSET_MIME = {
 }
 
 # 资源目录（用于季节 logo 等来自南+站点的素材）。
-_RESOURCES_DIR = Path(__file__).resolve().parents[2] / "resources"
+_RESOURCES_DIR = _PLUGIN_ROOT / "resources"
 
 # 季节站点 logo 文件名映射。
 _SEASONAL_LOGOS: dict[str, str] = {
@@ -156,16 +157,18 @@ class CredentialFormServer:
         platform: str = "",
     ) -> CredentialSession:
         self.ensure_started()
-        token = generate_token()
-        session = CredentialSession(
-            token=token,
-            user_key=user_key,
-            unified_msg_origin=unified_msg_origin,
-            platform=platform,
-            expires_at=expires_at_after(self.config.token_ttl_seconds),
-        )
-        entry = _LoginEntry(session=session)
         with self._lock:
+            token = generate_token()
+            while token in self._entries:
+                token = generate_token()
+            session = CredentialSession(
+                token=token,
+                user_key=user_key,
+                unified_msg_origin=unified_msg_origin,
+                platform=platform,
+                expires_at=expires_at_after(self.config.token_ttl_seconds),
+            )
+            entry = _LoginEntry(session=session)
             self._entries[token] = entry
         return session
 

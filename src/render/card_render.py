@@ -12,7 +12,8 @@ from astrbot.core import html_renderer
 from ..southplus.api import UserProfile
 
 _TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
-_ASSETS_DIR = Path(__file__).resolve().parents[2] / "assets"
+_PLUGIN_ROOT = Path(__file__).resolve().parents[2]
+_RESOURCES_DIR = _PLUGIN_ROOT / "resources"
 
 _jinja_env = Environment(
     loader=FileSystemLoader(str(_TEMPLATE_DIR)),
@@ -25,7 +26,7 @@ def _to_data_uri(data: bytes, mime: str = "image/png") -> str:
 
 
 def _load_logo_data_uri() -> str | None:
-    logo_path = _ASSETS_DIR / "logo.png"
+    logo_path = _RESOURCES_DIR / "logo-spring-south.png"
     if not logo_path.exists():
         return None
     return _to_data_uri(logo_path.read_bytes())

@@ -81,6 +81,7 @@ def test_form_page_lists_token_and_captcha(mock_southplus: MockSouthPlusState) -
     server = _make_server(mock_southplus)
     try:
         session = server.create_session(user_key="u1", unified_msg_origin="umo")
+        assert len(session.token) == 6
         with urllib.request.urlopen(server.build_url(session.token)) as response:
             assert response.status == 200
             html = response.read().decode("utf-8")
@@ -289,16 +290,16 @@ def test_unknown_path_returns_404(mock_southplus: MockSouthPlusState) -> None:
         server.shutdown()
 
 
-def test_assets_logo_served(mock_southplus: MockSouthPlusState) -> None:
+def test_assets_logo_png_not_served_without_asset_file(
+    mock_southplus: MockSouthPlusState,
+) -> None:
     server = _make_server(mock_southplus)
     try:
         server.ensure_started()
         url = f"http://{server.config.listen_host}:{server.actual_port}/assets/logo.png"
-        with urllib.request.urlopen(url) as response:
-            assert response.status == 200
-            assert response.headers.get("Content-Type", "") == "image/png"
-            body = response.read()
-            assert body.startswith(b"\x89PNG")
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            urllib.request.urlopen(url)
+        assert exc.value.code == 404
     finally:
         server.shutdown()
 
