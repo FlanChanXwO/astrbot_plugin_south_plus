@@ -35,12 +35,12 @@
 | `spdelete <uid>` | `sp删除 <uid>` | 普通用户 | 删除当前用户绑定的指定 UID。 |
 | `spbindcookie <cookie>` | `sp绑定 <cookie>` | 普通用户 | 直接用 Cookie 绑定账号。 |
 | `spprofile` | `sp资料` | 普通用户 | 抓取当前激活账号资料并渲染卡片。 |
-| `spcheckin` | `sp签到` | 普通用户 | 对当前激活账号执行日签和周签。 |
+| `spcheckin` | `sp签到` | 普通用户 | 对当前激活账号执行日签和周签，返回统一状态格式。 |
 | `spautocheckin` | `sp自动签到` | 普通用户 | 切换当前激活账号的自动签到开关。 |
 | `spsubcheckin` | `sp订阅签到` | 普通用户 | 订阅当前会话的当前账号签到结果推送。 |
 | `spunsubcheckin` | `sp取消签到` | 普通用户 | 取消当前会话的当前账号签到结果推送。 |
 | `spcheckinallsub` | `sp全局签到订阅` | 管理员 | 订阅或取消当前会话的全部账号签到结果推送。 |
-| `spallcheckin` | `sp全体签到` | 管理员 | 立即执行全部绑定账号签到。 |
+| `spallcheckin` | `sp全体签到` | 管理员 | 立即执行全部绑定账号签到，返回全体统计。 |
 | `spcleanup` | `sp清理` | 管理员 | 清理退群或非好友用户的绑定数据。 |
 
 ## 免责声明
