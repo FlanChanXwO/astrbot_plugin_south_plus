@@ -31,7 +31,13 @@ from .src.core.datamodels import CredentialSession
 from .src.pages import register_page_apis
 from .src.utils.logger import plugin_logger
 from .src.render.card_render import render_user_card
-from .src.shared.constants import PLUGIN_NAME
+from .src.shared.constants import (
+    CHECKIN_TASK_KEY_ALL,
+    CHECKIN_TASK_KEY_DAILY,
+    CHECKIN_TASK_KEY_SESSION,
+    CHECKIN_TASK_KEY_WEEKLY,
+    PLUGIN_NAME,
+)
 from .src.southplus.api import (
     CheckinReport,
     CheckinService,
@@ -359,12 +365,12 @@ class SouthPlusPlugin(Star):
 
         daily_skip = self.checkin_store.is_already_done(
             sp_uid=sp_uid,
-            task_key="sp.checkin.daily",
+            task_key=CHECKIN_TASK_KEY_DAILY,
             period_key=today,
         )
         weekly_skip = self.checkin_store.is_already_done(
             sp_uid=sp_uid,
-            task_key="sp.checkin.weekly",
+            task_key=CHECKIN_TASK_KEY_WEEKLY,
             period_key=this_week,
         )
 
@@ -389,7 +395,7 @@ class SouthPlusPlugin(Star):
         if daily_result is not None:
             self.checkin_store.record(
                 sp_uid=sp_uid,
-                task_key="sp.checkin.daily",
+                task_key=CHECKIN_TASK_KEY_DAILY,
                 period_key=today,
                 status=daily_result.status.value,
                 message=daily_result.message,
@@ -398,7 +404,7 @@ class SouthPlusPlugin(Star):
         if weekly_result is not None:
             self.checkin_store.record(
                 sp_uid=sp_uid,
-                task_key="sp.checkin.weekly",
+                task_key=CHECKIN_TASK_KEY_WEEKLY,
                 period_key=this_week,
                 status=weekly_result.status.value,
                 message=weekly_result.message,
@@ -427,7 +433,7 @@ class SouthPlusPlugin(Star):
         params = {"mode": "session", "account": account}
         self.scheduler.subscribe(
             umo,
-            task_key="sp.checkin.session",
+            task_key=CHECKIN_TASK_KEY_SESSION,
             cron=self.config_snapshot.auto_checkin_cron,
             params=params,
         )
@@ -439,8 +445,8 @@ class SouthPlusPlugin(Star):
         umo = event.unified_msg_origin
         account = event.get_sender_id()
         params = {"mode": "session", "account": account}
-        if self.scheduler.is_subscribed(umo, "sp.checkin.session", params):
-            self.scheduler.unsubscribe(umo, "sp.checkin.session", params)
+        if self.scheduler.is_subscribed(umo, CHECKIN_TASK_KEY_SESSION, params):
+            self.scheduler.unsubscribe(umo, CHECKIN_TASK_KEY_SESSION, params)
             yield event.plain_result("已取消本会话的签到结果订阅。")
         else:
             yield event.plain_result("当前会话未订阅签到结果。")
@@ -451,7 +457,7 @@ class SouthPlusPlugin(Star):
         """管理员：切换当前会话的全部账号签到结果推送订阅。"""
         umo = event.unified_msg_origin
         params = {"mode": "all"}
-        task_key = "sp.checkin.all"
+        task_key = CHECKIN_TASK_KEY_ALL
         if self.scheduler.is_subscribed(umo, task_key, params):
             self.scheduler.unsubscribe(umo, task_key, params)
             yield event.plain_result("已取消本会话的全部账号签到结果推送。")

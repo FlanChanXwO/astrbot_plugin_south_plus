@@ -22,6 +22,13 @@ from apscheduler.triggers.cron import CronTrigger
 
 from astrbot.api.event import MessageChain
 
+from ..shared.constants import (
+    CHECKIN_TASK_KEY_ALL,
+    CHECKIN_TASK_KEY_DAILY,
+    CHECKIN_TASK_KEY_PREFIX,
+    CHECKIN_TASK_KEY_SESSION,
+    CHECKIN_TASK_KEY_WEEKLY,
+)
 from ..southplus.api import CheckinService
 from ..southplus.models import CheckinStatus
 from ..utils import current_iso_week, current_local_date
@@ -91,7 +98,7 @@ class CheckinScheduler:
     def reload_config(self, *, cron: str, concurrency: int) -> None:
         self._semaphore = asyncio.Semaphore(max(1, concurrency))
         affected_umos = self._schedule_store.batch_update_cron(
-            task_key_prefix="sp.checkin.",
+            task_key_prefix=CHECKIN_TASK_KEY_PREFIX,
             new_cron=cron,
         )
         # 按 (umo, task_key) 重建受影响的 job
@@ -110,7 +117,7 @@ class CheckinScheduler:
 
     def refresh_checkin_jobs(self, umo: str) -> None:
         """刷新当前会话下两个签到聚合 job，供会话级排除变更后调用。"""
-        for task_key in ("sp.checkin.all", "sp.checkin.session"):
+        for task_key in (CHECKIN_TASK_KEY_ALL, CHECKIN_TASK_KEY_SESSION):
             self._ensure_job_for(umo, task_key)
 
     # ------------------------------------------------------------------
@@ -196,8 +203,11 @@ class CheckinScheduler:
         """
         if self._scheduler is None:
             return
-        # sp.checkin.* 有专用执行路径，不经过 TASK_REGISTRY
-        if not task_key.startswith("sp.checkin.") and task_key not in TASK_REGISTRY:
+        # 签到类任务有专用执行路径，不经过 TASK_REGISTRY。
+        if (
+            not task_key.startswith(CHECKIN_TASK_KEY_PREFIX)
+            and task_key not in TASK_REGISTRY
+        ):
             return
 
         job_id = _job_id_for_key(umo, task_key)
@@ -234,8 +244,8 @@ class CheckinScheduler:
 
     async def _tick_for_key(self, umo: str, task_key: str) -> None:
         """单个 (umo, task_key) 聚合触发。"""
-        # sp.checkin.* 有专用执行路径，不查 TASK_REGISTRY
-        is_checkin = task_key.startswith("sp.checkin.")
+        # 签到类任务有专用执行路径，不查 TASK_REGISTRY。
+        is_checkin = task_key.startswith(CHECKIN_TASK_KEY_PREFIX)
         task_cls = None
         if not is_checkin:
             task_cls = TASK_REGISTRY.get(task_key)
@@ -385,12 +395,12 @@ class CheckinScheduler:
 
         daily_skip = self._checkin_store.is_already_done(
             sp_uid=user.sp_uid,
-            task_key="sp.checkin.daily",
+            task_key=CHECKIN_TASK_KEY_DAILY,
             period_key=today,
         )
         weekly_skip = self._checkin_store.is_already_done(
             sp_uid=user.sp_uid,
-            task_key="sp.checkin.weekly",
+            task_key=CHECKIN_TASK_KEY_WEEKLY,
             period_key=this_week,
         )
 
@@ -463,7 +473,7 @@ class CheckinScheduler:
         if not daily_skip and daily_result:
             self._checkin_store.record(
                 sp_uid=user.sp_uid,
-                task_key="sp.checkin.daily",
+                task_key=CHECKIN_TASK_KEY_DAILY,
                 period_key=today,
                 status=daily_result.status.value,
                 message=daily_result.message,
@@ -472,7 +482,7 @@ class CheckinScheduler:
         if not weekly_skip and weekly_result:
             self._checkin_store.record(
                 sp_uid=user.sp_uid,
-                task_key="sp.checkin.weekly",
+                task_key=CHECKIN_TASK_KEY_WEEKLY,
                 period_key=this_week,
                 status=weekly_result.status.value,
                 message=weekly_result.message,
@@ -599,30 +609,21 @@ def _format_task_line(label: str, ok: int, skip: int, fail: int) -> str:
     return f"{label}：✅ {ok}  ⏭️ {skip}  ❌ {fail}"
 
 
-def _format_checkin_summary(title: str, stats: _ReportStats) -> str:
+TaskLineFormatter = Callable[[str, int, int, int], str]
+
+
+def _format_checkin_summary(
+    title: str,
+    stats: _ReportStats,
+    *,
+    line_formatter: TaskLineFormatter = _format_task_line,
+) -> str:
     lines = [
         title,
         f"南+账号：{stats.total} 个",
         f"完成 {stats.completed}：✅ 成功 {stats.completed}",
-        _format_task_line(
-            "社区·日签", stats.daily_ok, stats.daily_skip, stats.daily_fail
-        ),
-        _format_task_line(
-            "社区·周签", stats.weekly_ok, stats.weekly_skip, stats.weekly_fail
-        ),
-    ]
-    return "\n".join(lines)
-
-
-def _format_active_checkin_summary(title: str, stats: _ReportStats) -> str:
-    lines = [
-        title,
-        f"南+账号：{stats.total} 个",
-        f"完成 {stats.completed}：✅ 成功 {stats.completed}",
-        _format_active_task_line(
-            "社区·日签", stats.daily_ok, stats.daily_skip, stats.daily_fail
-        ),
-        _format_active_task_line(
+        line_formatter("社区·日签", stats.daily_ok, stats.daily_skip, stats.daily_fail),
+        line_formatter(
             "社区·周签", stats.weekly_ok, stats.weekly_skip, stats.weekly_fail
         ),
     ]
@@ -649,15 +650,16 @@ def _format_aggregated_report(
 
 
 def _subscription_report_title(task_key: str) -> str:
-    if task_key == "sp.checkin.all":
+    if task_key == CHECKIN_TASK_KEY_ALL:
         return "South Plus 自动签到（全局订阅）"
-    if task_key == "sp.checkin.session":
+    if task_key == CHECKIN_TASK_KEY_SESSION:
         return "South Plus 自动签到（会话订阅）"
     return "South Plus 自动签到"
 
 
 def _format_global_report(results: list[_PerUserResult]) -> str:
-    return _format_active_checkin_summary(
+    return _format_checkin_summary(
         "South Plus 主动签到（全体账号）",
         _build_report_stats(results),
+        line_formatter=_format_active_task_line,
     )
