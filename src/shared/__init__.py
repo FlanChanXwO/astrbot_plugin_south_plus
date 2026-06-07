@@ -1,5 +1,21 @@
 """跨包共享的非抓包常量与项目级标识。"""
 
-from .constants import LOG_PREFIX, PLUGIN_NAME
+from .constants import (
+    CHECKIN_TASK_KEY_ALL,
+    CHECKIN_TASK_KEY_DAILY,
+    CHECKIN_TASK_KEY_PREFIX,
+    CHECKIN_TASK_KEY_SESSION,
+    CHECKIN_TASK_KEY_WEEKLY,
+    LOG_PREFIX,
+    PLUGIN_NAME,
+)
 
-__all__ = ["LOG_PREFIX", "PLUGIN_NAME"]
+__all__ = [
+    "CHECKIN_TASK_KEY_ALL",
+    "CHECKIN_TASK_KEY_DAILY",
+    "CHECKIN_TASK_KEY_PREFIX",
+    "CHECKIN_TASK_KEY_SESSION",
+    "CHECKIN_TASK_KEY_WEEKLY",
+    "LOG_PREFIX",
+    "PLUGIN_NAME",
+]
