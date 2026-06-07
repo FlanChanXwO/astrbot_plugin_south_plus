@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 from typing import ClassVar
 
+from ...shared.constants import CHECKIN_TASK_KEY_DAILY, CHECKIN_TASK_KEY_WEEKLY
 from ...southplus.api import CheckinService
 from . import register_task
 from .base import ScheduledTask, TaskContext, TaskResult
@@ -15,7 +16,7 @@ from .base import ScheduledTask, TaskContext, TaskResult
 
 @register_task
 class DailyCheckinTask(ScheduledTask):
-    TASK_KEY: ClassVar[str] = "sp.checkin.daily"
+    TASK_KEY: ClassVar[str] = CHECKIN_TASK_KEY_DAILY
     DEFAULT_CRON: ClassVar[str] = "0 8 * * *"
 
     def __init__(self, checkin_service: CheckinService) -> None:
@@ -35,7 +36,7 @@ class DailyCheckinTask(ScheduledTask):
 
 @register_task
 class WeeklyCheckinTask(ScheduledTask):
-    TASK_KEY: ClassVar[str] = "sp.checkin.weekly"
+    TASK_KEY: ClassVar[str] = CHECKIN_TASK_KEY_WEEKLY
     DEFAULT_CRON: ClassVar[str] = "0 8 * * *"
 
     def __init__(self, checkin_service: CheckinService) -> None:

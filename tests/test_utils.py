@@ -131,7 +131,7 @@ def test_format_add_account_result_refreshed_and_owned_by_other() -> None:
     assert "10001" in owned
 
 
-def test_format_checkin_response_covers_cache_success_done_and_failed() -> None:
+def test_format_checkin_response_covers_success_done_and_failed() -> None:
     text = format_checkin_response(
         uid="10001",
         today="2026-06-06",
@@ -142,8 +142,16 @@ def test_format_checkin_response_covers_cache_success_done_and_failed() -> None:
             message="OK",
         ),
     )
-    assert "日签（2026-06-06，缓存）: 已签到" in text
-    assert "周签（2026-W23，新签）: 成功，OK" in text
+    assert text.split("\n") == [
+        "South Plus 主动签到",
+        "南+账号：1 个",
+        "UID：10001",
+        "完成 1：✅ 成功 1",
+        "社区·日签：⏭️ 请勿重复签到",
+        "社区·周签：✅ 成功",
+    ]
+    assert "缓存" not in text
+    assert "已缓存" not in text
 
     text = format_checkin_response(
         uid="10001",
@@ -159,8 +167,19 @@ def test_format_checkin_response_covers_cache_success_done_and_failed() -> None:
             error="boom",
         ),
     )
-    assert "日签（2026-06-06，新签）: 已签到，already" in text
-    assert "周签（2026-W23，新签）: 失败，boom" in text
+    assert "完成 0：✅ 成功 0" in text
+    assert "社区·日签：⏭️ 请勿重复签到" in text
+    assert "社区·周签：❌ 失败，boom" in text
+
+    text = format_checkin_response(
+        uid="10001",
+        today="2026-06-06",
+        this_week_label="2026-W23",
+        fresh_daily=None,
+        fresh_weekly=None,
+    )
+    assert "完成 1：✅ 成功 1" in text
+    assert text.count("⏭️ 请勿重复签到") == 2
 
 
 def test_season_name_boundaries() -> None:

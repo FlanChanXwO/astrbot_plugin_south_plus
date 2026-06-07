@@ -42,31 +42,41 @@ def format_checkin_response(
     fresh_daily: "CheckinTaskResult | None",
     fresh_weekly: "CheckinTaskResult | None",
 ) -> str:
-    """格式化一次日签 + 周签的用户可见结果。"""
-    daily_line = _format_dimension_line(
-        label="日签",
-        period_key=today,
-        fresh=fresh_daily,
-    )
-    weekly_line = _format_dimension_line(
-        label="周签",
-        period_key=this_week_label,
-        fresh=fresh_weekly,
-    )
-    return f"South Plus 签到结果\nUID: {uid}\n{daily_line}\n{weekly_line}"
+    """格式化一次日签 + 周签的用户可见结果。
+
+    ``today`` 和 ``this_week_label`` 仍保留在签名中，避免命令层为了文案调整
+    频繁改变调用契约；用户侧不展示本地缓存/周期 key 这类实现细节。
+    """
+    daily_failed = _checkin_status_value(fresh_daily) == "failed"
+    weekly_failed = _checkin_status_value(fresh_weekly) == "failed"
+    completed = 0 if daily_failed or weekly_failed else 1
+    lines = [
+        "South Plus 主动签到",
+        "南+账号：1 个",
+        f"UID：{uid}",
+        f"完成 {completed}：✅ 成功 {completed}",
+        _format_dimension_line(label="社区·日签", fresh=fresh_daily),
+        _format_dimension_line(label="社区·周签", fresh=fresh_weekly),
+    ]
+    return "\n".join(lines)
 
 
 def _format_dimension_line(
     *,
     label: str,
-    period_key: str,
     fresh: "CheckinTaskResult | None",
 ) -> str:
-    if fresh is None:
-        return f"{label}（{period_key}，缓存）: 已签到"
-    if fresh.status == "success":
-        return f"{label}（{period_key}，新签）: 成功，{fresh.message}"
-    if fresh.status == "already_done":
-        return f"{label}（{period_key}，新签）: 已签到，{fresh.message}"
+    status = _checkin_status_value(fresh)
+    if status == "success":
+        return f"{label}：✅ 成功"
+    if status == "already_done":
+        return f"{label}：⏭️ 请勿重复签到"
     detail = fresh.message or fresh.error or "未知错误"
-    return f"{label}（{period_key}，新签）: 失败，{detail}"
+    return f"{label}：❌ 失败，{detail}"
+
+
+def _checkin_status_value(fresh: "CheckinTaskResult | None") -> str:
+    if fresh is None:
+        return "already_done"
+    status = fresh.status
+    return getattr(status, "value", status)

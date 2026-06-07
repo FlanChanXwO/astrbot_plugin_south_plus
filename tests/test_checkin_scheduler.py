@@ -214,6 +214,7 @@ class TestRunAllCheckins:
         scheduler = _make_scheduler(user_store=ustore)
         text = await scheduler.run_all_checkins()
         assert "无绑定账号" in text
+        assert text.startswith("South Plus 主动签到（全体账号）")
 
     @pytest.mark.asyncio
     async def test_single_account_success(self) -> None:
@@ -235,8 +236,13 @@ class TestRunAllCheckins:
                 weekly_status=CheckinStatus.SUCCESS.value,
             )
             text = await scheduler.run_all_checkins()
-        assert "日签" in text
-        assert "周签" in text
+        assert text.split("\n") == [
+            "South Plus 主动签到（全体账号）",
+            "南+账号：1 个",
+            "完成 1：✅ 成功 1",
+            "社区·日签：✅ 1  ⏭️ 请勿重复签到 0  ❌ 0",
+            "社区·周签：✅ 1  ⏭️ 请勿重复签到 0  ❌ 0",
+        ]
 
 
 class TestSessionExclusion:
@@ -276,6 +282,8 @@ class TestSessionExclusion:
         ]
         estore.list_uids.assert_called_once_with("umo1")
         mock_push.assert_awaited_once()
+        assert mock_push.await_args.args[0] == "umo1"
+        assert mock_push.await_args.args[1] == "sp.checkin.all"
 
     @pytest.mark.asyncio
     async def test_session_mode_skips_excluded_active_uid(self) -> None:
@@ -310,6 +318,46 @@ class TestSessionExclusion:
 
         mock_checkin.assert_not_called()
         mock_push.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_session_mode_pushes_task_key_for_active_uid(self) -> None:
+        user = _make_user(sp_uid="uid-1", account="u1")
+        ustore = MagicMock()
+        ustore.list_all.return_value = [user]
+        sstore = MagicMock()
+        sstore.list_by_umo.return_value = [
+            _make_schedule(
+                umo="umo1",
+                task_key="sp.checkin.session",
+                params_json='{"mode":"session","account":"u1"}',
+            )
+        ]
+        estore = MagicMock()
+        estore.list_uids.return_value = set()
+        scheduler = _make_scheduler(
+            user_store=ustore,
+            schedule_store=sstore,
+            exclusion_store=estore,
+        )
+
+        with (
+            patch.object(
+                scheduler, "_checkin_user", new_callable=AsyncMock
+            ) as mock_checkin,
+            patch.object(
+                scheduler, "_push_report", new_callable=AsyncMock
+            ) as mock_push,
+        ):
+            mock_checkin.return_value = _make_per_user_result(sp_uid="uid-1")
+            await scheduler._tick_for_key("umo1", "sp.checkin.session")
+
+        assert [call.args[0].sp_uid for call in mock_checkin.await_args_list] == [
+            "uid-1"
+        ]
+        estore.list_uids.assert_called_once_with("umo1")
+        mock_push.assert_awaited_once()
+        assert mock_push.await_args.args[0] == "umo1"
+        assert mock_push.await_args.args[1] == "sp.checkin.session"
 
     def test_refresh_checkin_jobs_rebuilds_both_checkin_jobs(self) -> None:
         scheduler = _make_scheduler()
@@ -352,11 +400,30 @@ class TestFormatAggregatedReport:
                 weekly_status=CheckinStatus.SUCCESS.value,
             ),
         ]
-        text, failed = _format_aggregated_report(results)
-        assert "日签" in text
-        assert "周签" in text
-        assert "成功 2" in text
-        assert "失败" not in text
+        text, failed = _format_aggregated_report(results, task_key="sp.checkin.all")
+        assert text.split("\n") == [
+            "South Plus 自动签到（全局订阅）",
+            "南+账号：2 个",
+            "完成 2：✅ 成功 2",
+            "社区·日签：✅ 2  ⏭️ 0  ❌ 0",
+            "社区·周签：✅ 2  ⏭️ 0  ❌ 0",
+        ]
+        assert failed == []
+
+    def test_session_title(self) -> None:
+        text, failed = _format_aggregated_report(
+            [_make_per_user_result()],
+            task_key="sp.checkin.session",
+        )
+        assert text.split("\n")[0] == "South Plus 自动签到（会话订阅）"
+        assert failed == []
+
+    def test_unknown_title(self) -> None:
+        text, failed = _format_aggregated_report(
+            [_make_per_user_result()],
+            task_key="sp.checkin.unknown",
+        )
+        assert text.split("\n")[0] == "South Plus 自动签到"
         assert failed == []
 
     def test_mixed_with_failure(self) -> None:
@@ -376,8 +443,17 @@ class TestFormatAggregatedReport:
                 weekly_status=CheckinStatus.FAILED.value,
             ),
         ]
-        text, failed = _format_aggregated_report(results)
-        assert "失败 1" in text
+        text, failed = _format_aggregated_report(
+            results,
+            task_key="sp.checkin.session",
+        )
+        assert text.split("\n") == [
+            "South Plus 自动签到（会话订阅）",
+            "南+账号：2 个",
+            "完成 1：✅ 成功 1",
+            "社区·日签：✅ 1  ⏭️ 0  ❌ 1",
+            "社区·周签：✅ 1  ⏭️ 0  ❌ 1",
+        ]
         assert len(failed) == 1
         assert failed[0].user.sp_uid == "99999"
 
@@ -392,8 +468,10 @@ class TestFormatAggregatedReport:
             ),
         ]
         text, failed = _format_aggregated_report(results)
-        assert "跳过 1" in text
-        assert "失败" not in text
+        assert "南+账号：1 个" in text
+        assert "完成 1：✅ 成功 1" in text
+        assert "社区·日签：✅ 0  ⏭️ 1  ❌ 0" in text
+        assert "社区·周签：✅ 0  ⏭️ 1  ❌ 0" in text
         assert failed == []
 
     def test_no_failure_no_mention(self) -> None:
@@ -407,7 +485,8 @@ class TestFormatAggregatedReport:
             ),
         ]
         text, failed = _format_aggregated_report(results)
-        assert "失败" not in text
+        assert "完成 1：✅ 成功 1" in text
+        assert "❌ 0" in text
         assert failed == []
 
     def test_daily_fail_weekly_ok(self) -> None:
@@ -423,10 +502,11 @@ class TestFormatAggregatedReport:
         ]
         text, failed = _format_aggregated_report(results)
         lines = text.split("\n")
-        daily_line = next(ln for ln in lines if ln.startswith("日签"))
-        weekly_line = next(ln for ln in lines if ln.startswith("周签"))
-        assert "失败" in daily_line
-        assert "失败" not in weekly_line
+        daily_line = next(ln for ln in lines if ln.startswith("社区·日签"))
+        weekly_line = next(ln for ln in lines if ln.startswith("社区·周签"))
+        assert daily_line == "社区·日签：✅ 0  ⏭️ 0  ❌ 1"
+        assert weekly_line == "社区·周签：✅ 1  ⏭️ 0  ❌ 0"
+        assert "完成 0：✅ 成功 0" in text
         assert len(failed) == 1
         assert failed[0].user.account == "qq123"
 
@@ -434,7 +514,13 @@ class TestFormatAggregatedReport:
 class TestFormatGlobalReport:
     def test_empty(self) -> None:
         text = _format_global_report([])
-        assert "总账号数：0" in text
+        assert text.split("\n") == [
+            "South Plus 主动签到（全体账号）",
+            "南+账号：0 个",
+            "完成 0：✅ 成功 0",
+            "社区·日签：✅ 0  ⏭️ 请勿重复签到 0  ❌ 0",
+            "社区·周签：✅ 0  ⏭️ 请勿重复签到 0  ❌ 0",
+        ]
 
     def test_all_success(self) -> None:
         results = [
@@ -452,11 +538,28 @@ class TestFormatGlobalReport:
             ),
         ]
         text = _format_global_report(results)
-        assert "总账号数：2" in text
-        assert "日签" in text
-        assert "周签" in text
-        assert "成功 2" in text
-        assert "失败" not in text
+        assert text.split("\n") == [
+            "South Plus 主动签到（全体账号）",
+            "南+账号：2 个",
+            "完成 2：✅ 成功 2",
+            "社区·日签：✅ 2  ⏭️ 请勿重复签到 0  ❌ 0",
+            "社区·周签：✅ 2  ⏭️ 请勿重复签到 0  ❌ 0",
+        ]
+
+    def test_skipped_counts_as_completed(self) -> None:
+        results = [
+            _make_per_user_result(
+                sp_uid="10001",
+                account="u1",
+                skipped=True,
+                daily_status=CheckinStatus.ALREADY_DONE.value,
+                weekly_status=CheckinStatus.ALREADY_DONE.value,
+            ),
+        ]
+        text = _format_global_report(results)
+        assert "完成 1：✅ 成功 1" in text
+        assert "社区·日签：✅ 0  ⏭️ 请勿重复签到 1  ❌ 0" in text
+        assert "社区·周签：✅ 0  ⏭️ 请勿重复签到 1  ❌ 0" in text
 
     def test_with_failures(self) -> None:
         results = [
@@ -469,4 +572,6 @@ class TestFormatGlobalReport:
             ),
         ]
         text = _format_global_report(results)
-        assert "失败 1" in text
+        assert "完成 0：✅ 成功 0" in text
+        assert "社区·日签：✅ 0  ⏭️ 请勿重复签到 0  ❌ 1" in text
+        assert "社区·周签：✅ 0  ⏭️ 请勿重复签到 0  ❌ 1" in text
