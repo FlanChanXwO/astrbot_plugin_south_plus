@@ -18,7 +18,7 @@ from src.core.checkin_scheduler import (
 )
 from src.core.datamodels import ScheduleRow, UserRow
 from src.core.tasks.base import TaskResult
-from src.southplus.models import CheckinStatus
+from src.southplus.models import CheckinReport, CheckinStatus, CheckinTaskResult
 
 
 def _make_user(
@@ -99,6 +99,23 @@ def _make_schedule(
         created_at="2026-06-06",
         updated_at="2026-06-06",
     )
+
+
+def _assert_subscription_report_lines(
+    text: str,
+    *,
+    title: str,
+    total: int,
+    completed: int,
+    daily_line: str,
+    weekly_line: str,
+) -> None:
+    lines = text.splitlines()
+    assert lines[0] == title
+    assert f"南+账号：{total} 个" in lines
+    assert f"完成 {completed}：✅ 成功 {completed}" in lines
+    assert daily_line in lines
+    assert weekly_line in lines
 
 
 # ---------------------------------------------------------------------------
@@ -236,13 +253,50 @@ class TestRunAllCheckins:
                 weekly_status=CheckinStatus.SUCCESS.value,
             )
             text = await scheduler.run_all_checkins()
-        assert text.split("\n") == [
+        assert text.splitlines() == [
             "South Plus 主动签到（全体账号）",
             "南+账号：1 个",
             "完成 1：✅ 成功 1",
             "社区·日签：✅ 1  ⏭️ 请勿重复签到 0  ❌ 0",
             "社区·周签：✅ 1  ⏭️ 请勿重复签到 0  ❌ 0",
         ]
+
+    @pytest.mark.asyncio
+    async def test_first_checkin_success_counts_as_ok_in_subscription_report(
+        self,
+    ) -> None:
+        user = _make_user()
+        cstore = MagicMock()
+        cstore.is_already_done.return_value = False
+        scheduler = _make_scheduler(checkin_store=cstore)
+        scheduler._checkin_service.checkin.return_value = CheckinReport(
+            daily=CheckinTaskResult(
+                status=CheckinStatus.SUCCESS,
+                message="日签：领取成功",
+            ),
+            weekly=CheckinTaskResult(
+                status=CheckinStatus.SUCCESS,
+                message="周签：领取成功",
+            ),
+        )
+
+        result = await scheduler._do_checkin_both(user)
+
+        assert result is not None
+        assert result.daily_status == CheckinStatus.SUCCESS.value
+        assert result.weekly_status == CheckinStatus.SUCCESS.value
+        text, failed = _format_aggregated_report(
+            [result], task_key="sp.checkin.session"
+        )
+        _assert_subscription_report_lines(
+            text,
+            title="South Plus 自动签到（会话订阅）",
+            total=1,
+            completed=1,
+            daily_line="社区·日签：✅ 1  ⏭️ 0  ❌ 0",
+            weekly_line="社区·周签：✅ 1  ⏭️ 0  ❌ 0",
+        )
+        assert failed == []
 
 
 class TestSessionExclusion:
@@ -401,13 +455,14 @@ class TestFormatAggregatedReport:
             ),
         ]
         text, failed = _format_aggregated_report(results, task_key="sp.checkin.all")
-        assert text.split("\n") == [
-            "South Plus 自动签到（全局订阅）",
-            "南+账号：2 个",
-            "完成 2：✅ 成功 2",
-            "社区·日签：✅ 2  ⏭️ 0  ❌ 0",
-            "社区·周签：✅ 2  ⏭️ 0  ❌ 0",
-        ]
+        _assert_subscription_report_lines(
+            text,
+            title="South Plus 自动签到（全局订阅）",
+            total=2,
+            completed=2,
+            daily_line="社区·日签：✅ 2  ⏭️ 0  ❌ 0",
+            weekly_line="社区·周签：✅ 2  ⏭️ 0  ❌ 0",
+        )
         assert failed == []
 
     def test_session_title(self) -> None:
@@ -415,7 +470,7 @@ class TestFormatAggregatedReport:
             [_make_per_user_result()],
             task_key="sp.checkin.session",
         )
-        assert text.split("\n")[0] == "South Plus 自动签到（会话订阅）"
+        assert text.splitlines()[0] == "South Plus 自动签到（会话订阅）"
         assert failed == []
 
     def test_unknown_title(self) -> None:
@@ -423,7 +478,7 @@ class TestFormatAggregatedReport:
             [_make_per_user_result()],
             task_key="sp.checkin.unknown",
         )
-        assert text.split("\n")[0] == "South Plus 自动签到"
+        assert text.splitlines()[0] == "South Plus 自动签到"
         assert failed == []
 
     def test_mixed_with_failure(self) -> None:
@@ -447,17 +502,18 @@ class TestFormatAggregatedReport:
             results,
             task_key="sp.checkin.session",
         )
-        assert text.split("\n") == [
-            "South Plus 自动签到（会话订阅）",
-            "南+账号：2 个",
-            "完成 1：✅ 成功 1",
-            "社区·日签：✅ 1  ⏭️ 0  ❌ 1",
-            "社区·周签：✅ 1  ⏭️ 0  ❌ 1",
-        ]
+        _assert_subscription_report_lines(
+            text,
+            title="South Plus 自动签到（会话订阅）",
+            total=2,
+            completed=1,
+            daily_line="社区·日签：✅ 1  ⏭️ 0  ❌ 1",
+            weekly_line="社区·周签：✅ 1  ⏭️ 0  ❌ 1",
+        )
         assert len(failed) == 1
         assert failed[0].user.sp_uid == "99999"
 
-    def test_skipped_count(self) -> None:
+    def test_already_done_counts_as_skip(self) -> None:
         results = [
             _make_per_user_result(
                 sp_uid="10001",
@@ -501,7 +557,7 @@ class TestFormatAggregatedReport:
             ),
         ]
         text, failed = _format_aggregated_report(results)
-        lines = text.split("\n")
+        lines = text.splitlines()
         daily_line = next(ln for ln in lines if ln.startswith("社区·日签"))
         weekly_line = next(ln for ln in lines if ln.startswith("社区·周签"))
         assert daily_line == "社区·日签：✅ 0  ⏭️ 0  ❌ 1"
@@ -514,7 +570,7 @@ class TestFormatAggregatedReport:
 class TestFormatGlobalReport:
     def test_empty(self) -> None:
         text = _format_global_report([])
-        assert text.split("\n") == [
+        assert text.splitlines() == [
             "South Plus 主动签到（全体账号）",
             "南+账号：0 个",
             "完成 0：✅ 成功 0",
@@ -538,7 +594,7 @@ class TestFormatGlobalReport:
             ),
         ]
         text = _format_global_report(results)
-        assert text.split("\n") == [
+        assert text.splitlines() == [
             "South Plus 主动签到（全体账号）",
             "南+账号：2 个",
             "完成 2：✅ 成功 2",
