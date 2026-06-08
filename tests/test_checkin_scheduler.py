@@ -18,7 +18,7 @@ from src.core.checkin_scheduler import (
 )
 from src.core.datamodels import ScheduleRow, UserRow
 from src.core.tasks.base import TaskResult
-from src.southplus.models import CheckinStatus
+from src.southplus.models import CheckinReport, CheckinStatus, CheckinTaskResult
 
 
 def _make_user(
@@ -244,6 +244,42 @@ class TestRunAllCheckins:
             "社区·周签：✅ 1  ⏭️ 请勿重复签到 0  ❌ 0",
         ]
 
+    @pytest.mark.asyncio
+    async def test_first_checkin_success_counts_as_ok_in_subscription_report(
+        self,
+    ) -> None:
+        user = _make_user()
+        cstore = MagicMock()
+        cstore.is_already_done.return_value = False
+        scheduler = _make_scheduler(checkin_store=cstore)
+        scheduler._checkin_service.checkin.return_value = CheckinReport(
+            daily=CheckinTaskResult(
+                status=CheckinStatus.SUCCESS,
+                message="日签：领取成功",
+            ),
+            weekly=CheckinTaskResult(
+                status=CheckinStatus.SUCCESS,
+                message="周签：领取成功",
+            ),
+        )
+
+        result = await scheduler._do_checkin_both(user)
+
+        assert result is not None
+        assert result.daily_status == CheckinStatus.SUCCESS.value
+        assert result.weekly_status == CheckinStatus.SUCCESS.value
+        text, failed = _format_aggregated_report(
+            [result], task_key="sp.checkin.session"
+        )
+        assert text.split("\n") == [
+            "South Plus 自动签到（会话订阅）",
+            "南+账号：1 个",
+            "完成 1：✅ 成功 1",
+            "社区·日签：✅ 1  ⏭️ 0  ❌ 0",
+            "社区·周签：✅ 1  ⏭️ 0  ❌ 0",
+        ]
+        assert failed == []
+
 
 class TestSessionExclusion:
     @pytest.mark.asyncio
@@ -457,7 +493,7 @@ class TestFormatAggregatedReport:
         assert len(failed) == 1
         assert failed[0].user.sp_uid == "99999"
 
-    def test_skipped_count(self) -> None:
+    def test_already_done_counts_as_skip(self) -> None:
         results = [
             _make_per_user_result(
                 sp_uid="10001",
