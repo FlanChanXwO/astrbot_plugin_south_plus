@@ -129,8 +129,8 @@ DEFAULT_CHECKIN_VERIFY = "5af36471"
 #                          可能出现在 state-B 文案的子串里，而 state-B 的关键字
 #                          （"请赶紧 / 去完成"）只在 state-B 出现。
 #
-# 关键字检测顺序（collect）：登录态 -> state-C（ALREADY_DONE）-> 刚领取成功
-#                            （SUCCESS）-> 兜底失败。
+# 关键字检测顺序（collect）：登录态 -> state-C 旁路（继续 verify）-> 刚领取
+#                            成功（继续 verify）-> 兜底失败。
 #                            注意：先 C 再 SUCCESS，因为"你[日常]已经完成!"等
 #                            state-C 文案含"完成"子串，会被宽松的 SUCCESS 误命中。
 #
@@ -182,7 +182,7 @@ APPLY_NEEDS_COLLECT_KEYWORDS = (
 # 2. "未申请任务!"：表面像 state-A，但当前流程已经先跑过 apply。collect 仍说
 #    "未申请"通常意味着任务已在 endtasks 列表里，phpwind 不再把它视为
 #    "进行中"——典型场景是用户在站点手动签到 + 领取后，再调本插件触发签到。
-#    这种情况按用户意图当作 ALREADY_DONE（提示"请勿重复签到"）。
+#    若本轮 apply 已进入 state-B，继续 verify；verify 确认后按 SUCCESS。
 #
 # 顺序：先于 COLLECT_SUCCESS_KEYWORDS 检查——"你[日常]已经完成!" 含"完成"
 # 子串，会被宽松的 SUCCESS 误命中。

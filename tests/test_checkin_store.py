@@ -173,7 +173,61 @@ def test_already_done_cache_logic(tmp_path: Path) -> None:
     )
     # record 是 upsert，所以会覆盖。测试脏文案被正确过滤。
     assert not store.is_already_done(
+        sp_uid="uid1",
+        task_key="sp.checkin.daily",
+        period_key="2026-06-04",
+    )
+
+
+def test_genuine_status_preserves_success_and_already_done(tmp_path: Path) -> None:
+    store = CheckinStore(tmp_path / "southplus.db")
+    store.record(
+        sp_uid="uid1",
+        task_key="sp.checkin.daily",
+        period_key="2026-06-04",
+        status="success",
+        message="日签：完成[日常]任务,获得奖励",
+        error="",
+    )
+    assert (
+        store.get_genuine_status(
+            sp_uid="uid1",
+            task_key="sp.checkin.daily",
+            period_key="2026-06-04",
+        )
+        == "success"
+    )
+
+    store.record(
         sp_uid="uid2",
-        task_key="sp.checkin.weekly",
-        period_key="2026-W23",
+        task_key="sp.checkin.daily",
+        period_key="2026-06-04",
+        status="already_done",
+        message="日签：已签到，请勿重复签到。",
+        error="",
+    )
+    assert (
+        store.get_genuine_status(
+            sp_uid="uid2",
+            task_key="sp.checkin.daily",
+            period_key="2026-06-04",
+        )
+        == "already_done"
+    )
+
+    store.record(
+        sp_uid="uid3",
+        task_key="sp.checkin.daily",
+        period_key="2026-06-04",
+        status="success",
+        message="未申请任务",
+        error="",
+    )
+    assert (
+        store.get_genuine_status(
+            sp_uid="uid3",
+            task_key="sp.checkin.daily",
+            period_key="2026-06-04",
+        )
+        is None
     )
