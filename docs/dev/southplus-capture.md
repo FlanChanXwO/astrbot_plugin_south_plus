@@ -1,6 +1,6 @@
 # South Plus 抓包与逆向流程
 
-> **Capture 日期：2026-06-06**（文档目录整理：本文从 `docs/southplus-capture.md` 迁入 `docs/dev/southplus-capture.md`，并同步更新代码注释与入口文档中的引用路径；抓包结论本身未变。上一轮抓包结论：关键字状态机扩容，apply 阶段加入 `"拒离" / "还没超过" / "已经完成" / "已完成"` 等 state-C 别名，apply NEEDS_COLLECT 中移除 `"申请["`，collect 阶段把 `"未申请任务!"` / `"你已经完成!"` 一并归到 state-C。）
+> **Capture 日期：2026-06-09**（本轮修正状态归类：apply 一开始命中 state-C 仍为 ALREADY_DONE；但 apply 已进入 state-B 后，collect 阶段即使命中 `"未申请任务!"` / `"你已经完成!"` / `"请勿重复"` 等 state-C 旁路文案，也必须继续 verify，verify 确认 state-C 后计为本轮 SUCCESS。）
 >
 > **维护规则（仅适用于本文档）**
 > - 每次重新抓包，无论结果是否变化，都必须更新顶部 "Capture 日期" 为当次抓包的日期 (YYYY-MM-DD)。
@@ -269,7 +269,7 @@ file /tmp/sp_captcha.bin
 | **B** | 已申请未领取 | newtasks（进行中） |
 | **C** | 已领取（完成）；常伴 18 小时冷却拒绝 | endtasks（已完成） |
 
-一次完整签到必须把任务从 A 推到 C。**用户在站点手动完成签到**等同于把任务直接推到 C，此时本插件再触发 /spcheckin 会被 phpwind 反映为以下任意一种 state-C 文案，全部按 ALREADY_DONE 处理（向用户提示"请勿重复签到"）：
+一次完整签到必须把任务从 A 推到 C。**本轮 apply 一开始就命中 state-C**，表示插件开始前站点已经完成，按 ALREADY_DONE 处理（向用户提示"请勿重复签到"）。**本轮 apply 已进入 state-B 后**，collect 再命中 state-C 旁路文案时，必须继续 verify；verify 确认 state-C 后按 SUCCESS 处理，因为本轮已经走过有效签到流程。
 
 | 阶段 | 抓包到的 state-C 文案 | 关键字命中 |
 | --- | --- | --- |
@@ -301,7 +301,7 @@ GET，cookie 必带 `eb9e6_winduser` 等登录 cookie，UA 与登录抓包同。
 关键字检测顺序固定为：
 
 * **apply**：登录态 → state-B (NEEDS_COLLECT) → state-C (ALREADY_COLLECTED) → 兜底 FAILED；
-* **collect**：登录态 → state-C (ALREADY_DONE) → 刚领取 (SUCCESS) → 兜底 FAILED；
+* **collect**：登录态 → state-C 旁路（继续 verify）→ 刚领取（继续 verify）→ 兜底 FAILED；
 * **verify**：登录态 → state-C (ALREADY_COLLECTED) 视为 SUCCESS → 兜底 FAILED。
 
 所有关键字来自抓包 / 参考仓库观察到的原始中文文案，匹配用 `in`。表与 `src/southplus/api/constants.py` 一一对应。
@@ -311,14 +311,14 @@ GET，cookie 必带 `eb9e6_winduser` 等登录 cookie，UA 与登录抓包同。
 | `NOT_LOGGED_IN_TASK_KEYWORDS` | apply / collect / verify | Cookie 已失效，整体 FAILED 并提示重新 /splogin | `还没有登录`、`暂时不能使用此功能` |
 | `APPLY_NEEDS_COLLECT_KEYWORDS` | apply | state-B：继续走 collect + verify | `请赶紧`、`去完成`、`申请成功`、`进行中` |
 | `APPLY_ALREADY_COLLECTED_KEYWORDS` | apply / verify | state-C：apply 阶段命中 → ALREADY_DONE 短路；verify 阶段命中 → SUCCESS 确认 | `请勿重复`、`已领取`、`已经完成`、`已完成`、`拒离`、`还没超过`、`本周已完成`、`今天已完成` |
-| `COLLECT_ALREADY_DONE_KEYWORDS` | collect | state-C：用户已外部完成 / cooldown / 任务从 progress 列表消失 → ALREADY_DONE，输出"请勿重复签到" | `请勿重复`、`已领取`、`已经完成`、`已完成`、`未申请`、`拒离`、`还没超过` |
+| `COLLECT_ALREADY_DONE_KEYWORDS` | collect | state-C 旁路：任务已不在 progress 列表；若 apply 已进入 state-B，则继续 verify，verify 通过后计 SUCCESS | `请勿重复`、`已领取`、`已经完成`、`已完成`、`未申请`、`拒离`、`还没超过` |
 | `COLLECT_SUCCESS_KEYWORDS` | collect | state-B → C：刚领取成功 | `获得`、`奖励`、`成功`、`领取` |
 
 **关键陷阱 / 设计决定**：
 
 * 不要把 `"申请["` 放进 `APPLY_NEEDS_COLLECT_KEYWORDS`——冷却消息 `"拒离上次申请[日常]还没超过 18 小时"` 也含此串，会把 state-C 错配为 state-B。state-B 文案 `"申请[日常]任务完成,请赶紧去完成任务吧!"` 已被 `"请赶紧 / 去完成"` 覆盖，不需要 `"申请["`。
-* 不要把 `"完成"` 放进 `COLLECT_SUCCESS_KEYWORDS`——state-C 文案 `"你[日常]已经完成!"` 同样含 `"完成"`。collect 阶段必须 ALREADY_DONE 先于 SUCCESS 检查。
-* `COLLECT_REQUIRES_APPLY_KEYWORDS` 已被废弃为空 tuple。phpwind 在 state-C 场景同样会返回 `"未申请任务!"`（任务已不在 progress 列表的副作用），按 `FAILED` 处理会误伤"用户已手动签到"的合法用例；现统一归到 `COLLECT_ALREADY_DONE_KEYWORDS`。
+* 不要把 `"完成"` 放进 `COLLECT_SUCCESS_KEYWORDS`——state-C 文案 `"你[日常]已经完成!"` 同样含 `"完成"`。collect 阶段必须先识别 state-C 旁路，再进入 SUCCESS/verify 流程。
+* `COLLECT_REQUIRES_APPLY_KEYWORDS` 已被废弃为空 tuple。phpwind 在 state-C 场景同样会返回 `"未申请任务!"`（任务已不在 progress 列表的副作用），按 `FAILED` 处理会误伤合法用例；现统一归到 `COLLECT_ALREADY_DONE_KEYWORDS`，并在 apply 已进入 state-B 后继续 verify。
 * ALREADY_DONE 的用户可见消息固定为 `"<label>：已签到，请勿重复签到。"`——不向用户暴露站点原文，避免 `"未申请任务!"` 之类的反直觉文案直达用户。
 * verify 必须命中 `APPLY_ALREADY_COLLECTED_KEYWORDS`；如果仍返回 state-B 文案，无论 collect 自报多成功都判 FAILED，并把 collect / verify 两段原文一起塞 `error`。
 

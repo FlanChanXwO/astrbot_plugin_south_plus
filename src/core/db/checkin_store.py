@@ -9,11 +9,13 @@ from __future__ import annotations
 import sqlite3
 import threading
 from pathlib import Path
+from typing import Literal
 
 from ..datamodels import CheckinRow
 from ._connection import connect as _db_connect
 
 _STALE_SUCCESS_MARKERS = ("未申请", "请赶紧", "去完成")
+GenuineCheckinStatus = Literal["success", "already_done"]
 
 
 class CheckinStore:
@@ -83,12 +85,22 @@ class CheckinStore:
 
     def is_already_done(self, *, sp_uid: str, task_key: str, period_key: str) -> bool:
         """该期是否已经可信地完成——缓存跳过判断。"""
+        return bool(
+            self.get_genuine_status(
+                sp_uid=sp_uid, task_key=task_key, period_key=period_key
+            )
+        )
+
+    def get_genuine_status(
+        self, *, sp_uid: str, task_key: str, period_key: str
+    ) -> GenuineCheckinStatus | None:
+        """返回可信缓存状态；None 表示无缓存或缓存不可信。"""
         row = self.get_for_period(
             sp_uid=sp_uid, task_key=task_key, period_key=period_key
         )
         if row is None:
-            return False
-        return _cache_is_genuine(row.status, row.message)
+            return None
+        return _genuine_cache_status(row.status, row.message)
 
     def history(
         self, *, sp_uid: str, task_key: str, limit: int = 50
@@ -136,13 +148,15 @@ class CheckinStore:
         return [_row_to_checkin(r) for r in rows]
 
 
-def _cache_is_genuine(status: str, message: str) -> bool:
-    """信任 already_done；信任 success 但剔除误判的 stale 记录。"""
+def _genuine_cache_status(status: str, message: str) -> GenuineCheckinStatus | None:
+    """保留可信缓存的原始分类，用于报告层区分成功与跳过。"""
     if status == "already_done":
-        return True
+        return status
     if status != "success":
-        return False
-    return not any(marker in message for marker in _STALE_SUCCESS_MARKERS)
+        return None
+    if any(marker in message for marker in _STALE_SUCCESS_MARKERS):
+        return None
+    return status
 
 
 def _row_to_checkin(row: sqlite3.Row) -> CheckinRow:
