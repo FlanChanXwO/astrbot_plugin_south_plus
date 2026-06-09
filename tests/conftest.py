@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 import threading
 import types
@@ -18,6 +19,21 @@ _MIN_PNG = bytes.fromhex(
     "0000000d49444154789c63000100000005000100"
     "0d0a2db40000000049454e44ae426082"
 )
+
+_PROXY_ENV_KEYS = (
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+)
+
+
+def _clear_proxy_env_for_tests() -> None:
+    """测试只访问本地 mock server，避免开发机代理污染 httpx。"""
+    for key in _PROXY_ENV_KEYS:
+        os.environ.pop(key, None)
 
 
 def _install_astrbot_stub() -> None:
@@ -119,6 +135,7 @@ def _install_astrbot_stub() -> None:
     sys.modules["astrbot.api.star"] = star
 
 
+_clear_proxy_env_for_tests()
 _install_astrbot_stub()
 
 

@@ -238,37 +238,58 @@ def test_apply_already_applied_still_runs_collect_and_verify(mock_tasks_server) 
     assert actions == [("15", "job"), ("15", "job2"), ("15", "job")]
 
 
-def test_collect_says_already_completed_returns_already_done(mock_tasks_server) -> None:
-    """用户报告的回归：collect 返回 "你[日常]已经完成!"——state-C，必须当
-    ALREADY_DONE，不能因为含 "完成" 子串被旧版 SUCCESS_KEYWORDS 误判。"""
+def test_collect_says_already_completed_after_apply_state_b_verifies_success(
+    mock_tasks_server,
+) -> None:
+    """apply 已进入 state-B 后，collect 的 state-C 文案也属于本轮成功。
 
-    base_url, responses, _ = mock_tasks_server
-    responses[("15", "job")] = _xml("ok\t申请[日常]任务完成,请赶紧去完成任务吧!")
+    关键区别：如果 apply 一开始就是 state-C，说明本轮开始前已签，仍是
+    ALREADY_DONE；但 apply 已经把任务推入/确认在 state-B 后，collect 再返回
+    "已经完成" 且 verify 确认 state-C，应计入本轮 SUCCESS。
+    """
+
+    base_url, responses, requests = mock_tasks_server
+    responses[("15", "job")] = _CountedBody(
+        [
+            _xml("ok\t申请[日常]任务完成,请赶紧去完成任务吧!"),
+            _xml("ok\t请勿重复申请,该任务已完成!"),
+        ]
+    )
     responses[("15", "job2")] = _xml("ok\t你[日常]已经完成!")
 
     result = _make_client(base_url).checkin_daily("cookie")
 
-    assert result.status is CheckinStatus.ALREADY_DONE
-    assert "请勿重复签到" in result.message
+    assert result.status is CheckinStatus.SUCCESS
+    assert "已确认完成" in result.message
+    actions = [(r["cid"], r["actions"]) for r in requests]
+    assert actions == [("15", "job"), ("15", "job2"), ("15", "job")]
 
 
-def test_collect_says_not_applied_now_returns_already_done(mock_tasks_server) -> None:
-    """用户报告的回归：collect 返回 "未申请任务!（14）"——典型 state-C 旁路：
-    用户已在站点手动签到，任务已不在 progress 列表，phpwind collect 报"未申请"。
+def test_collect_says_not_applied_after_apply_state_b_verifies_success(
+    mock_tasks_server,
+) -> None:
+    """apply 已进入 state-B 后，collect 的 "未申请" 需靠 verify 判定。
 
-    按用户口径，这种情形应统一归到 ALREADY_DONE（"请勿重复签到"），不再
-    判 FAILED。
+    phpwind 会在任务已离开进行中列表时返回 "未申请任务!"；只要 verify 再次
+    apply 能确认 state-C，就说明本轮有效流程已经把结果推到完成态。
     """
-    base_url, responses, _ = mock_tasks_server
-    responses[("14", "job")] = _xml("ok\t申请[周常]任务完成,请赶紧去完成任务吧!")
+    base_url, responses, requests = mock_tasks_server
+    responses[("14", "job")] = _CountedBody(
+        [
+            _xml("ok\t申请[周常]任务完成,请赶紧去完成任务吧!"),
+            _xml("ok\t本周已完成签到任务,请勿重复申请!"),
+        ]
+    )
     responses[("14", "job2")] = _xml("ok\t未申请任务!\t14")
 
     result = _make_client(base_url).checkin_weekly("cookie")
 
-    assert result.status is CheckinStatus.ALREADY_DONE
-    assert "请勿重复签到" in result.message
+    assert result.status is CheckinStatus.SUCCESS
+    assert "已确认完成" in result.message
     # 不能把站点原文 "未申请任务" 直抛给用户。
     assert "未申请" not in result.message
+    actions = [(r["cid"], r["actions"]) for r in requests]
+    assert actions == [("14", "job"), ("14", "job2"), ("14", "job")]
 
 
 def test_collect_success_but_verify_state_b_returns_failed(mock_tasks_server) -> None:

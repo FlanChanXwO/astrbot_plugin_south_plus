@@ -80,7 +80,7 @@ class CaptchaPayload:
 class CheckinStatus(str, Enum):
     """单项签到（日/周）的执行结果。"""
 
-    SUCCESS = "success"  # 本次跑通了 apply + collect，从站点拿到了奖励文案
+    SUCCESS = "success"  # 本次有效流程经 verify 确认已到完成态
     ALREADY_DONE = "already_done"  # 站点告知今日/本周已完成（视作成功）
     FAILED = "failed"  # 任何步骤抛错；详细错误见 ``error`` 字段
 

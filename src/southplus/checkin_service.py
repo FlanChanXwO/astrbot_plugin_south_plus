@@ -19,8 +19,9 @@
 2. ``collect`` (actions=job2)：
    * B -> C（"完成[日常]任务,获得奖励\t10 G"）；
    * C -> 报错 "你[日常]已经完成!" / "请勿重复..." / "未申请任务!"——后者
-     是 phpwind 把 state-C 任务从"进行中"列表里抽走后的副作用，按用户口径
-     统一当作 ALREADY_DONE（"请勿重复签到"）。
+     是 phpwind 把 state-C 任务从"进行中"列表里抽走后的副作用。若本轮
+     ``apply`` 已进入 state-B，继续走 verify；verify 确认 state-C 后按本轮
+     SUCCESS 处理。
 3. ``verify``：再调一次 ``apply``，期望响应命中 state-C 关键字。这是站点级别
    的"领取后真的进了完成列表"程序化校验：只有 verify 也确认 state-C 才算
    签到成功。
@@ -162,6 +163,29 @@ def _already_done_result(label: str) -> CheckinTaskResult:
     )
 
 
+def _success_result(
+    label: str,
+    collect_resp: _RawResponse,
+    *,
+    confirmed_only: bool = False,
+) -> CheckinTaskResult:
+    """本轮流程经 verify 确认到达 state-C。
+
+    ``confirmed_only`` 用于 collect 返回 state-C 旁路文案（如"未申请任务"）的
+    场景，避免把站点误导性原文展示给用户。
+    """
+
+    if confirmed_only:
+        return CheckinTaskResult(
+            status=CheckinStatus.SUCCESS,
+            message=f"{label}：已确认完成。",
+        )
+    return CheckinTaskResult(
+        status=CheckinStatus.SUCCESS,
+        message=f"{label}：{collect_resp.message}{_format_extra(collect_resp.extra)}",
+    )
+
+
 def run_checkin(
     session: SouthPlusSession,
     cookie_header: str,
@@ -222,11 +246,11 @@ def run_checkin(
 
     # 必须先于 SUCCESS 检查：state-C 文案 "你[日常]已经完成!" 含 "完成"，
     # 也会被 COLLECT_SUCCESS_KEYWORDS 命中（虽然 SUCCESS 已剔掉"完成"，
-    # 但保持先 ALREADY_DONE 后 SUCCESS 的顺序，是稳的）。
+    # 但保持先识别 state-C 旁路，再走 verify，是稳的）。
+    collect_confirmed_terminal = False
     if _matches_any(collect_resp.message, COLLECT_ALREADY_DONE_KEYWORDS):
-        return _already_done_result(label)
-
-    if not _matches_any(collect_resp.message, COLLECT_SUCCESS_KEYWORDS):
+        collect_confirmed_terminal = True
+    elif not _matches_any(collect_resp.message, COLLECT_SUCCESS_KEYWORDS):
         return CheckinTaskResult(
             status=CheckinStatus.FAILED,
             message=f"{label} 领取阶段失败：{collect_resp.message or '(空响应)'}",
@@ -248,16 +272,20 @@ def run_checkin(
 
     if _matches_any(verify_resp.message, APPLY_ALREADY_COLLECTED_KEYWORDS):
         # state-C 验证通过——本次确实从 B 推到了 C。
-        return CheckinTaskResult(
-            status=CheckinStatus.SUCCESS,
-            message=f"{label}：{collect_resp.message}{_format_extra(collect_resp.extra)}",
+        return _success_result(
+            label,
+            collect_resp,
+            confirmed_only=collect_confirmed_terminal,
         )
 
     # collect 自称成功但 verify 仍要继续 collect / 仍处于 state-B → 实际上没生效。
+    collect_message = (
+        "已确认完成" if collect_confirmed_terminal else collect_resp.message
+    )
     return CheckinTaskResult(
         status=CheckinStatus.FAILED,
         message=(
-            f"{label} 领取后校验未通过：领取响应「{collect_resp.message}」，"
+            f"{label} 领取后校验未通过：领取响应「{collect_message}」，"
             f"二次申请仍返回「{verify_resp.message}」，请稍后重试或手动查看。"
         ),
         error=(f"collect={collect_resp.raw_body}\nverify={verify_resp.raw_body}"),

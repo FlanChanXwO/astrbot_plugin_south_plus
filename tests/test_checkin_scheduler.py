@@ -298,6 +298,104 @@ class TestRunAllCheckins:
         )
         assert failed == []
 
+    @pytest.mark.asyncio
+    async def test_cached_success_counts_as_ok_in_subscription_report(self) -> None:
+        user = _make_user()
+        cstore = MagicMock()
+        cstore.get_genuine_status.return_value = CheckinStatus.SUCCESS.value
+        scheduler = _make_scheduler(checkin_store=cstore)
+        cstore.is_already_done.return_value = True
+
+        result = await scheduler._do_checkin_both(user)
+
+        assert result is not None
+        assert result.daily_status == CheckinStatus.SUCCESS.value
+        assert result.weekly_status == CheckinStatus.SUCCESS.value
+        scheduler._checkin_service.checkin.assert_not_called()
+        text, failed = _format_aggregated_report(
+            [result], task_key="sp.checkin.session"
+        )
+        _assert_subscription_report_lines(
+            text,
+            title="South Plus 自动签到（会话订阅）",
+            total=1,
+            completed=1,
+            daily_line="社区·日签：✅ 1  ⏭️ 0  ❌ 0",
+            weekly_line="社区·周签：✅ 1  ⏭️ 0  ❌ 0",
+        )
+        assert failed == []
+
+    @pytest.mark.asyncio
+    async def test_cached_already_done_counts_as_skip_in_subscription_report(
+        self,
+    ) -> None:
+        user = _make_user()
+        cstore = MagicMock()
+        cstore.get_genuine_status.return_value = CheckinStatus.ALREADY_DONE.value
+        scheduler = _make_scheduler(checkin_store=cstore)
+        cstore.is_already_done.return_value = True
+
+        result = await scheduler._do_checkin_both(user)
+
+        assert result is not None
+        assert result.daily_status == CheckinStatus.ALREADY_DONE.value
+        assert result.weekly_status == CheckinStatus.ALREADY_DONE.value
+        scheduler._checkin_service.checkin.assert_not_called()
+        text, failed = _format_aggregated_report(
+            [result], task_key="sp.checkin.session"
+        )
+        _assert_subscription_report_lines(
+            text,
+            title="South Plus 自动签到（会话订阅）",
+            total=1,
+            completed=1,
+            daily_line="社区·日签：✅ 0  ⏭️ 1  ❌ 0",
+            weekly_line="社区·周签：✅ 0  ⏭️ 1  ❌ 0",
+        )
+        assert failed == []
+
+    @pytest.mark.asyncio
+    async def test_cached_daily_success_and_fresh_weekly_success_count_as_ok(
+        self,
+    ) -> None:
+        user = _make_user()
+        cstore = MagicMock()
+
+        def cached_status(*, task_key: str, **_: str) -> str:
+            if task_key == "sp.checkin.daily":
+                return CheckinStatus.SUCCESS.value
+            return ""
+
+        cstore.get_genuine_status.side_effect = cached_status
+        scheduler = _make_scheduler(checkin_store=cstore)
+        cstore.is_already_done.side_effect = lambda *, task_key, **_: task_key == (
+            "sp.checkin.daily"
+        )
+        scheduler._checkin_service.checkin_weekly.return_value = CheckinTaskResult(
+            status=CheckinStatus.SUCCESS,
+            message="周签：领取成功",
+        )
+
+        result = await scheduler._do_checkin_both(user)
+
+        assert result is not None
+        assert result.daily_status == CheckinStatus.SUCCESS.value
+        assert result.weekly_status == CheckinStatus.SUCCESS.value
+        scheduler._checkin_service.checkin.assert_not_called()
+        scheduler._checkin_service.checkin_weekly.assert_called_once_with(user.cookie)
+        text, failed = _format_aggregated_report(
+            [result], task_key="sp.checkin.session"
+        )
+        _assert_subscription_report_lines(
+            text,
+            title="South Plus 自动签到（会话订阅）",
+            total=1,
+            completed=1,
+            daily_line="社区·日签：✅ 1  ⏭️ 0  ❌ 0",
+            weekly_line="社区·周签：✅ 1  ⏭️ 0  ❌ 0",
+        )
+        assert failed == []
+
 
 class TestSessionExclusion:
     @pytest.mark.asyncio

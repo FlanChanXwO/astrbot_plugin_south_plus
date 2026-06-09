@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.0.3] - 2026-06-09
+
+### Fixed
+- **首次签到成功不再误显示跳过**：apply 已进入 state-B 后，collect 命中已完成/未申请等 state-C 旁路文案会继续 verify，确认完成后计入 `✅`
+- **自动推送缓存分类修正**：本地可信 `success` 缓存计入 `✅`，只有可信 `already_done` 缓存计入 `⏭️`
+
+### Documentation
+- **抓包状态机同步**：更新 South Plus 签到状态机说明与 Capture 日期
+
 ## [1.0.2] - 2026-06-08
 
 ### Fixed
