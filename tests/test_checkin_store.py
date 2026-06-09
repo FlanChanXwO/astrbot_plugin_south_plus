@@ -229,5 +229,5 @@ def test_genuine_status_preserves_success_and_already_done(tmp_path: Path) -> No
             task_key="sp.checkin.daily",
             period_key="2026-06-04",
         )
-        == ""
+        is None
     )

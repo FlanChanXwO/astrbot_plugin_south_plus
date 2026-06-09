@@ -36,6 +36,12 @@ def _clear_proxy_env_for_tests() -> None:
         os.environ.pop(key, None)
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _isolated_proxy_env() -> None:
+    """显式隔离 pytest 进程代理变量，避免本地 mock server 测试误走代理。"""
+    _clear_proxy_env_for_tests()
+
+
 def _install_astrbot_stub() -> None:
     """测试环境没有 AstrBot SDK 时，提供插件测试所需的最小接口。"""
     if "astrbot.api.event" in sys.modules:
@@ -135,7 +141,6 @@ def _install_astrbot_stub() -> None:
     sys.modules["astrbot.api.star"] = star
 
 
-_clear_proxy_env_for_tests()
 _install_astrbot_stub()
 
 

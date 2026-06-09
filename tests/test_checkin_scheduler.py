@@ -69,6 +69,8 @@ def _make_scheduler(
     ustore = user_store or MagicMock()
     cstore = checkin_store or MagicMock()
     cstore.is_already_done.return_value = False
+    if checkin_store is None:
+        cstore.get_genuine_status.return_value = None
     sstore = schedule_store or MagicMock()
     send_message = AsyncMock()
     return CheckinScheduler(
@@ -240,6 +242,7 @@ class TestRunAllCheckins:
         ustore.list_all.return_value = [user]
         cstore = MagicMock()
         cstore.is_already_done.return_value = False
+        cstore.get_genuine_status.return_value = None
 
         scheduler = _make_scheduler(user_store=ustore, checkin_store=cstore)
         with patch.object(
@@ -268,6 +271,7 @@ class TestRunAllCheckins:
         user = _make_user()
         cstore = MagicMock()
         cstore.is_already_done.return_value = False
+        cstore.get_genuine_status.return_value = None
         scheduler = _make_scheduler(checkin_store=cstore)
         scheduler._checkin_service.checkin.return_value = CheckinReport(
             daily=CheckinTaskResult(
@@ -361,10 +365,10 @@ class TestRunAllCheckins:
         user = _make_user()
         cstore = MagicMock()
 
-        def cached_status(*, task_key: str, **_: str) -> str:
+        def cached_status(*, task_key: str, **_: str) -> str | None:
             if task_key == "sp.checkin.daily":
                 return CheckinStatus.SUCCESS.value
-            return ""
+            return None
 
         cstore.get_genuine_status.side_effect = cached_status
         scheduler = _make_scheduler(checkin_store=cstore)

@@ -9,9 +9,9 @@
   "请勿重复签到"提示，不暴露站点原文。
 * apply 返回 state-B 文案 "已经申请[日常]完成,请赶紧去完成任务吧!"——必须继续
   跑 collect + verify，不能短路成 ALREADY_DONE。
-* collect 返回 state-C 文案 "你[日常]已经完成!" / "未申请任务!" → 落
-  ALREADY_DONE 而非 FAILED；前者明显，后者来自"用户在站点手动签到导致任务
-  已不在 progress 列表"的情形。
+* apply 已进入 state-B 后，collect 返回 state-C 旁路文案
+  "你[日常]已经完成!" / "未申请任务!" → 继续 verify；verify 确认 state-C 后
+  计入 SUCCESS。
 * collect 成功但 verify 仍返回 state-B → 视为没真正生效，落 FAILED。
 * 任务接口返回"还没有登录" / "暂时不能使用此功能" → 立即落 FAILED 提示重新登录。
 * XML parse 失败回落 FAILED 不抛。
@@ -290,6 +290,33 @@ def test_collect_says_not_applied_after_apply_state_b_verifies_success(
     assert "未申请" not in result.message
     actions = [(r["cid"], r["actions"]) for r in requests]
     assert actions == [("14", "job"), ("14", "job2"), ("14", "job")]
+
+
+def test_collect_already_done_but_verify_not_terminal_returns_failed(
+    mock_tasks_server,
+) -> None:
+    """collect 命中 state-C 旁路，但 verify 未确认完成时必须失败。
+
+    这条锁定 ``collect_confirmed_terminal=True`` 的负路径：失败提示应使用
+    归一化后的"已确认完成"，但不能把 verify 未达 state-C 误当成功。
+    """
+    base_url, responses, requests = mock_tasks_server
+    responses[("15", "job")] = _CountedBody(
+        [
+            _xml("ok\t申请[日常]任务完成,请赶紧去完成任务吧!"),
+            _xml("ok\t已经申请[日常]完成,请赶紧去完成任务吧!"),
+        ]
+    )
+    responses[("15", "job2")] = _xml("ok\t你[日常]已经完成!")
+
+    result = _make_client(base_url).checkin_daily("cookie")
+
+    assert result.status is CheckinStatus.FAILED
+    assert "校验未通过" in result.message
+    assert "已确认完成" in result.message
+    assert "你[日常]已经完成" not in result.message
+    actions = [(r["cid"], r["actions"]) for r in requests]
+    assert actions == [("15", "job"), ("15", "job2"), ("15", "job")]
 
 
 def test_collect_success_but_verify_state_b_returns_failed(mock_tasks_server) -> None:

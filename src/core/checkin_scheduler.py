@@ -343,14 +343,12 @@ class CheckinScheduler:
         period_key = today if "daily" in task_key else this_week
 
         # 跳过已签
-        cached_status = _normalise_cached_status(
-            self._checkin_store.get_genuine_status(
-                sp_uid=user.sp_uid,
-                task_key=task_key,
-                period_key=period_key,
-            )
+        cached_status = self._checkin_store.get_genuine_status(
+            sp_uid=user.sp_uid,
+            task_key=task_key,
+            period_key=period_key,
         )
-        if cached_status:
+        if cached_status is not None:
             return _PerUserResult(
                 user=user,
                 result=TaskResult(
@@ -399,22 +397,18 @@ class CheckinScheduler:
         today = current_local_date()
         this_week = current_iso_week()
 
-        daily_cached_status = _normalise_cached_status(
-            self._checkin_store.get_genuine_status(
-                sp_uid=user.sp_uid,
-                task_key=CHECKIN_TASK_KEY_DAILY,
-                period_key=today,
-            )
+        daily_cached_status = self._checkin_store.get_genuine_status(
+            sp_uid=user.sp_uid,
+            task_key=CHECKIN_TASK_KEY_DAILY,
+            period_key=today,
         )
-        weekly_cached_status = _normalise_cached_status(
-            self._checkin_store.get_genuine_status(
-                sp_uid=user.sp_uid,
-                task_key=CHECKIN_TASK_KEY_WEEKLY,
-                period_key=this_week,
-            )
+        weekly_cached_status = self._checkin_store.get_genuine_status(
+            sp_uid=user.sp_uid,
+            task_key=CHECKIN_TASK_KEY_WEEKLY,
+            period_key=this_week,
         )
-        daily_skip = bool(daily_cached_status)
-        weekly_skip = bool(weekly_cached_status)
+        daily_skip = daily_cached_status is not None
+        weekly_skip = weekly_cached_status is not None
 
         try:
             if not daily_skip and not weekly_skip:
@@ -459,10 +453,10 @@ class CheckinScheduler:
                 skipped=False,
                 daily_status=CheckinStatus.FAILED.value
                 if not daily_skip
-                else daily_cached_status,
+                else daily_cached_status or "",
                 weekly_status=CheckinStatus.FAILED.value
                 if not weekly_skip
-                else weekly_cached_status,
+                else weekly_cached_status or "",
             )
 
         # 维度状态
@@ -473,7 +467,7 @@ class CheckinScheduler:
                 else daily_cached_status or CheckinStatus.ALREADY_DONE.value
             )
             if not daily_skip
-            else daily_cached_status
+            else daily_cached_status or ""
         )
         ws = (
             (
@@ -482,7 +476,7 @@ class CheckinScheduler:
                 else weekly_cached_status or CheckinStatus.ALREADY_DONE.value
             )
             if not weekly_skip
-            else weekly_cached_status
+            else weekly_cached_status or ""
         )
 
         if not daily_skip and daily_result:
@@ -565,14 +559,6 @@ def _job_id_for_key(umo: str, task_key: str) -> str:
 
 def _is_failed(result: _PerUserResult) -> bool:
     return result.result.status == CheckinStatus.FAILED.value
-
-
-def _normalise_cached_status(status: object) -> str:
-    if status == CheckinStatus.SUCCESS.value:
-        return CheckinStatus.SUCCESS.value
-    if status == CheckinStatus.ALREADY_DONE.value:
-        return CheckinStatus.ALREADY_DONE.value
-    return ""
 
 
 @dataclass(slots=True)
