@@ -63,6 +63,25 @@ from .src.utils import (
 )
 
 
+_CHECKIN_REPORT_SCOPE_CURRENT = "当前账号"
+_CHECKIN_REPORT_SCOPE_ALL = "全部账号"
+_CHECKIN_REPORT_SUBSCRIBE_HINT = (
+    "本命令不会立即执行签到，后续将按自动签到时间推送结果。"
+)
+
+
+def _checkin_report_subscribed_message(scope: str) -> str:
+    return f"已订阅本会话的签到汇报（{scope}）。{_CHECKIN_REPORT_SUBSCRIBE_HINT}"
+
+
+def _checkin_report_unsubscribed_message(scope: str) -> str:
+    return f"已取消本会话的签到汇报订阅（{scope}）。"
+
+
+def _checkin_report_not_subscribed_message(scope: str) -> str:
+    return f"当前会话未订阅签到汇报（{scope}）。"
+
+
 class SouthPlusPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig | None = None) -> None:
         super().__init__(context)
@@ -438,8 +457,7 @@ class SouthPlusPlugin(Star):
             params=params,
         )
         yield event.plain_result(
-            "已订阅本会话的签到汇报（当前账号）。"
-            "本命令不会立即执行签到，后续将按自动签到时间推送结果。"
+            _checkin_report_subscribed_message(_CHECKIN_REPORT_SCOPE_CURRENT)
         )
 
     @filter.command("spunsubcheckin", alias={"sp取消签到"})
@@ -450,9 +468,13 @@ class SouthPlusPlugin(Star):
         params = {"mode": "session", "account": account}
         if self.scheduler.is_subscribed(umo, CHECKIN_TASK_KEY_SESSION, params):
             self.scheduler.unsubscribe(umo, CHECKIN_TASK_KEY_SESSION, params)
-            yield event.plain_result("已取消本会话的签到汇报订阅（当前账号）。")
+            yield event.plain_result(
+                _checkin_report_unsubscribed_message(_CHECKIN_REPORT_SCOPE_CURRENT)
+            )
         else:
-            yield event.plain_result("当前会话未订阅签到汇报（当前账号）。")
+            yield event.plain_result(
+                _checkin_report_not_subscribed_message(_CHECKIN_REPORT_SCOPE_CURRENT)
+            )
 
     @filter.command("spcheckinallsub", alias={"sp全局签到订阅"})
     @filter.permission_type(PermissionType.ADMIN)
@@ -463,7 +485,9 @@ class SouthPlusPlugin(Star):
         task_key = CHECKIN_TASK_KEY_ALL
         if self.scheduler.is_subscribed(umo, task_key, params):
             self.scheduler.unsubscribe(umo, task_key, params)
-            yield event.plain_result("已取消本会话的签到汇报订阅（全部账号）。")
+            yield event.plain_result(
+                _checkin_report_unsubscribed_message(_CHECKIN_REPORT_SCOPE_ALL)
+            )
             return
         self.scheduler.subscribe(
             umo,
@@ -472,8 +496,7 @@ class SouthPlusPlugin(Star):
             params=params,
         )
         yield event.plain_result(
-            "已订阅本会话的签到汇报（全部账号）。"
-            "本命令不会立即执行签到，后续将按自动签到时间推送结果。"
+            _checkin_report_subscribed_message(_CHECKIN_REPORT_SCOPE_ALL)
         )
 
     @filter.command("spallcheckin", alias={"sp全体签到"})
