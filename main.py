@@ -4,6 +4,7 @@ import asyncio
 import io
 import tempfile
 import time
+from enum import Enum
 from pathlib import Path
 
 import qrcode
@@ -61,6 +62,26 @@ from .src.utils import (
     season_name,
     wrap_docs_link,
 )
+
+
+class CheckinReportScope(str, Enum):
+    CURRENT_ACCOUNT = "当前账号"
+    ALL_ACCOUNTS = "全部账号"
+
+
+CHECKIN_REPORT_SUBSCRIBE_HINT = "本命令不会立即执行签到，后续将按自动签到时间推送结果。"
+
+
+def format_checkin_report_subscribed_message(scope: CheckinReportScope) -> str:
+    return f"已订阅本会话的签到汇报（{scope.value}）。{CHECKIN_REPORT_SUBSCRIBE_HINT}"
+
+
+def format_checkin_report_unsubscribed_message(scope: CheckinReportScope) -> str:
+    return f"已取消本会话的签到汇报订阅（{scope.value}）。"
+
+
+def format_checkin_report_not_subscribed_message(scope: CheckinReportScope) -> str:
+    return f"当前会话未订阅签到汇报（{scope.value}）。"
 
 
 class SouthPlusPlugin(Star):
@@ -427,7 +448,7 @@ class SouthPlusPlugin(Star):
 
     @filter.command("spsubcheckin", alias={"sp订阅签到"})
     async def sp_sub_checkin(self, event: AstrMessageEvent):
-        """订阅当前会话的自动签到结果推送（仅当前账号）。"""
+        """订阅当前会话的自动签到汇报（仅当前账号）。"""
         umo = event.unified_msg_origin
         account = event.get_sender_id()
         params = {"mode": "session", "account": account}
@@ -437,30 +458,44 @@ class SouthPlusPlugin(Star):
             cron=self.config_snapshot.auto_checkin_cron,
             params=params,
         )
-        yield event.plain_result("已订阅本会话的签到结果推送（仅当前账号）。")
+        yield event.plain_result(
+            format_checkin_report_subscribed_message(CheckinReportScope.CURRENT_ACCOUNT)
+        )
 
     @filter.command("spunsubcheckin", alias={"sp取消签到"})
     async def sp_unsub_checkin(self, event: AstrMessageEvent):
-        """取消当前会话的签到结果推送订阅。"""
+        """取消当前会话的自动签到汇报订阅。"""
         umo = event.unified_msg_origin
         account = event.get_sender_id()
         params = {"mode": "session", "account": account}
         if self.scheduler.is_subscribed(umo, CHECKIN_TASK_KEY_SESSION, params):
             self.scheduler.unsubscribe(umo, CHECKIN_TASK_KEY_SESSION, params)
-            yield event.plain_result("已取消本会话的签到结果订阅。")
+            yield event.plain_result(
+                format_checkin_report_unsubscribed_message(
+                    CheckinReportScope.CURRENT_ACCOUNT
+                )
+            )
         else:
-            yield event.plain_result("当前会话未订阅签到结果。")
+            yield event.plain_result(
+                format_checkin_report_not_subscribed_message(
+                    CheckinReportScope.CURRENT_ACCOUNT
+                )
+            )
 
     @filter.command("spcheckinallsub", alias={"sp全局签到订阅"})
     @filter.permission_type(PermissionType.ADMIN)
     async def sp_checkin_all_sub_toggle(self, event: AstrMessageEvent):
-        """管理员：切换当前会话的全部账号签到结果推送订阅。"""
+        """管理员：切换当前会话的全部账号签到汇报订阅。"""
         umo = event.unified_msg_origin
         params = {"mode": "all"}
         task_key = CHECKIN_TASK_KEY_ALL
         if self.scheduler.is_subscribed(umo, task_key, params):
             self.scheduler.unsubscribe(umo, task_key, params)
-            yield event.plain_result("已取消本会话的全部账号签到结果推送。")
+            yield event.plain_result(
+                format_checkin_report_unsubscribed_message(
+                    CheckinReportScope.ALL_ACCOUNTS
+                )
+            )
             return
         self.scheduler.subscribe(
             umo,
@@ -468,7 +503,9 @@ class SouthPlusPlugin(Star):
             cron=self.config_snapshot.auto_checkin_cron,
             params=params,
         )
-        yield event.plain_result("已订阅本会话的全部账号签到结果推送。")
+        yield event.plain_result(
+            format_checkin_report_subscribed_message(CheckinReportScope.ALL_ACCOUNTS)
+        )
 
     @filter.command("spallcheckin", alias={"sp全体签到"})
     @filter.permission_type(PermissionType.ADMIN)
