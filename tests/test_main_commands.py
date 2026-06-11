@@ -71,27 +71,34 @@ def _user(auto_checkin: bool) -> UserRow:
 
 
 @pytest.mark.parametrize(
-    "scope_attr",
-    ["_CHECKIN_REPORT_SCOPE_CURRENT", "_CHECKIN_REPORT_SCOPE_ALL"],
+    ("scope_name", "scope_label"),
+    [
+        ("CURRENT_ACCOUNT", "当前账号"),
+        ("ALL_ACCOUNTS", "全部账号"),
+    ],
 )
-def test_checkin_report_message_helpers_share_wording(scope_attr: str) -> None:
+def test_checkin_report_message_helpers_share_wording(
+    scope_name: str, scope_label: str
+) -> None:
     module = _load_plugin_module()
-    scope = getattr(module, scope_attr)
+    scope = getattr(module.CheckinReportScope, scope_name)
 
+    assert scope.value == scope_label
     assert (
-        module._CHECKIN_REPORT_SUBSCRIBE_HINT
+        module.CHECKIN_REPORT_SUBSCRIBE_HINT
         == "本命令不会立即执行签到，后续将按自动签到时间推送结果。"
     )
-    assert module._checkin_report_subscribed_message(scope) == (
-        f"已订阅本会话的签到汇报（{scope}）。{module._CHECKIN_REPORT_SUBSCRIBE_HINT}"
+    assert module.format_checkin_report_subscribed_message(scope) == (
+        f"已订阅本会话的签到汇报（{scope_label}）。"
+        f"{module.CHECKIN_REPORT_SUBSCRIBE_HINT}"
     )
     assert (
-        module._checkin_report_unsubscribed_message(scope)
-        == f"已取消本会话的签到汇报订阅（{scope}）。"
+        module.format_checkin_report_unsubscribed_message(scope)
+        == f"已取消本会话的签到汇报订阅（{scope_label}）。"
     )
     assert (
-        module._checkin_report_not_subscribed_message(scope)
-        == f"当前会话未订阅签到汇报（{scope}）。"
+        module.format_checkin_report_not_subscribed_message(scope)
+        == f"当前会话未订阅签到汇报（{scope_label}）。"
     )
 
 
@@ -151,7 +158,9 @@ async def test_spsubcheckin_subscribes_current_account_report_only() -> None:
     plugin.scheduler.unsubscribe.assert_not_called()
     plugin.scheduler.run_all_checkins.assert_not_called()
     assert result == [
-        module._checkin_report_subscribed_message(module._CHECKIN_REPORT_SCOPE_CURRENT)
+        module.format_checkin_report_subscribed_message(
+            module.CheckinReportScope.CURRENT_ACCOUNT
+        )
     ]
 
 
@@ -176,8 +185,8 @@ async def test_spunsubcheckin_unsubscribes_current_account_when_present() -> Non
     )
     plugin.scheduler.subscribe.assert_not_called()
     assert result == [
-        module._checkin_report_unsubscribed_message(
-            module._CHECKIN_REPORT_SCOPE_CURRENT
+        module.format_checkin_report_unsubscribed_message(
+            module.CheckinReportScope.CURRENT_ACCOUNT
         )
     ]
 
@@ -199,8 +208,8 @@ async def test_spunsubcheckin_reports_current_account_not_subscribed() -> None:
     plugin.scheduler.unsubscribe.assert_not_called()
     plugin.scheduler.subscribe.assert_not_called()
     assert result == [
-        module._checkin_report_not_subscribed_message(
-            module._CHECKIN_REPORT_SCOPE_CURRENT
+        module.format_checkin_report_not_subscribed_message(
+            module.CheckinReportScope.CURRENT_ACCOUNT
         )
     ]
 
@@ -227,7 +236,9 @@ async def test_spcheckinallsub_subscribes_current_session_when_missing() -> None
     )
     plugin.scheduler.unsubscribe.assert_not_called()
     assert result == [
-        module._checkin_report_subscribed_message(module._CHECKIN_REPORT_SCOPE_ALL)
+        module.format_checkin_report_subscribed_message(
+            module.CheckinReportScope.ALL_ACCOUNTS
+        )
     ]
 
 
@@ -247,7 +258,9 @@ async def test_spcheckinallsub_unsubscribes_current_session_when_present() -> No
     )
     plugin.scheduler.subscribe.assert_not_called()
     assert result == [
-        module._checkin_report_unsubscribed_message(module._CHECKIN_REPORT_SCOPE_ALL)
+        module.format_checkin_report_unsubscribed_message(
+            module.CheckinReportScope.ALL_ACCOUNTS
+        )
     ]
 
 

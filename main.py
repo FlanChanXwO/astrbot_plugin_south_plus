@@ -4,6 +4,7 @@ import asyncio
 import io
 import tempfile
 import time
+from enum import Enum
 from pathlib import Path
 
 import qrcode
@@ -63,23 +64,24 @@ from .src.utils import (
 )
 
 
-_CHECKIN_REPORT_SCOPE_CURRENT = "当前账号"
-_CHECKIN_REPORT_SCOPE_ALL = "全部账号"
-_CHECKIN_REPORT_SUBSCRIBE_HINT = (
-    "本命令不会立即执行签到，后续将按自动签到时间推送结果。"
-)
+class CheckinReportScope(str, Enum):
+    CURRENT_ACCOUNT = "当前账号"
+    ALL_ACCOUNTS = "全部账号"
 
 
-def _checkin_report_subscribed_message(scope: str) -> str:
-    return f"已订阅本会话的签到汇报（{scope}）。{_CHECKIN_REPORT_SUBSCRIBE_HINT}"
+CHECKIN_REPORT_SUBSCRIBE_HINT = "本命令不会立即执行签到，后续将按自动签到时间推送结果。"
 
 
-def _checkin_report_unsubscribed_message(scope: str) -> str:
-    return f"已取消本会话的签到汇报订阅（{scope}）。"
+def format_checkin_report_subscribed_message(scope: CheckinReportScope) -> str:
+    return f"已订阅本会话的签到汇报（{scope.value}）。{CHECKIN_REPORT_SUBSCRIBE_HINT}"
 
 
-def _checkin_report_not_subscribed_message(scope: str) -> str:
-    return f"当前会话未订阅签到汇报（{scope}）。"
+def format_checkin_report_unsubscribed_message(scope: CheckinReportScope) -> str:
+    return f"已取消本会话的签到汇报订阅（{scope.value}）。"
+
+
+def format_checkin_report_not_subscribed_message(scope: CheckinReportScope) -> str:
+    return f"当前会话未订阅签到汇报（{scope.value}）。"
 
 
 class SouthPlusPlugin(Star):
@@ -457,7 +459,7 @@ class SouthPlusPlugin(Star):
             params=params,
         )
         yield event.plain_result(
-            _checkin_report_subscribed_message(_CHECKIN_REPORT_SCOPE_CURRENT)
+            format_checkin_report_subscribed_message(CheckinReportScope.CURRENT_ACCOUNT)
         )
 
     @filter.command("spunsubcheckin", alias={"sp取消签到"})
@@ -469,11 +471,15 @@ class SouthPlusPlugin(Star):
         if self.scheduler.is_subscribed(umo, CHECKIN_TASK_KEY_SESSION, params):
             self.scheduler.unsubscribe(umo, CHECKIN_TASK_KEY_SESSION, params)
             yield event.plain_result(
-                _checkin_report_unsubscribed_message(_CHECKIN_REPORT_SCOPE_CURRENT)
+                format_checkin_report_unsubscribed_message(
+                    CheckinReportScope.CURRENT_ACCOUNT
+                )
             )
         else:
             yield event.plain_result(
-                _checkin_report_not_subscribed_message(_CHECKIN_REPORT_SCOPE_CURRENT)
+                format_checkin_report_not_subscribed_message(
+                    CheckinReportScope.CURRENT_ACCOUNT
+                )
             )
 
     @filter.command("spcheckinallsub", alias={"sp全局签到订阅"})
@@ -486,7 +492,9 @@ class SouthPlusPlugin(Star):
         if self.scheduler.is_subscribed(umo, task_key, params):
             self.scheduler.unsubscribe(umo, task_key, params)
             yield event.plain_result(
-                _checkin_report_unsubscribed_message(_CHECKIN_REPORT_SCOPE_ALL)
+                format_checkin_report_unsubscribed_message(
+                    CheckinReportScope.ALL_ACCOUNTS
+                )
             )
             return
         self.scheduler.subscribe(
@@ -496,7 +504,7 @@ class SouthPlusPlugin(Star):
             params=params,
         )
         yield event.plain_result(
-            _checkin_report_subscribed_message(_CHECKIN_REPORT_SCOPE_ALL)
+            format_checkin_report_subscribed_message(CheckinReportScope.ALL_ACCOUNTS)
         )
 
     @filter.command("spallcheckin", alias={"sp全体签到"})
