@@ -106,6 +106,67 @@ async def test_spautocheckin_ignores_legacy_arguments() -> None:
 
 
 @pytest.mark.asyncio
+async def test_spsubcheckin_subscribes_current_account_report_only() -> None:
+    plugin = _plugin_instance()
+    event = _Event()
+
+    result = await _collect(plugin.sp_sub_checkin(event))
+
+    plugin.scheduler.subscribe.assert_called_once_with(
+        "aiocqhttp:group:100",
+        task_key="sp.checkin.session",
+        cron="0 8 * * *",
+        params={"mode": "session", "account": "account-1"},
+    )
+    plugin.scheduler.unsubscribe.assert_not_called()
+    plugin.scheduler.run_all_checkins.assert_not_called()
+    assert result == [
+        "已订阅本会话的签到汇报（当前账号）。"
+        "本命令不会立即执行签到，后续将按自动签到时间推送结果。"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_spunsubcheckin_unsubscribes_current_account_when_present() -> None:
+    plugin = _plugin_instance()
+    plugin.scheduler.is_subscribed.return_value = True
+    event = _Event()
+
+    result = await _collect(plugin.sp_unsub_checkin(event))
+
+    plugin.scheduler.is_subscribed.assert_called_once_with(
+        "aiocqhttp:group:100",
+        "sp.checkin.session",
+        {"mode": "session", "account": "account-1"},
+    )
+    plugin.scheduler.unsubscribe.assert_called_once_with(
+        "aiocqhttp:group:100",
+        "sp.checkin.session",
+        {"mode": "session", "account": "account-1"},
+    )
+    plugin.scheduler.subscribe.assert_not_called()
+    assert result == ["已取消本会话的签到汇报订阅（当前账号）。"]
+
+
+@pytest.mark.asyncio
+async def test_spunsubcheckin_reports_current_account_not_subscribed() -> None:
+    plugin = _plugin_instance()
+    plugin.scheduler.is_subscribed.return_value = False
+    event = _Event()
+
+    result = await _collect(plugin.sp_unsub_checkin(event))
+
+    plugin.scheduler.is_subscribed.assert_called_once_with(
+        "aiocqhttp:group:100",
+        "sp.checkin.session",
+        {"mode": "session", "account": "account-1"},
+    )
+    plugin.scheduler.unsubscribe.assert_not_called()
+    plugin.scheduler.subscribe.assert_not_called()
+    assert result == ["当前会话未订阅签到汇报（当前账号）。"]
+
+
+@pytest.mark.asyncio
 async def test_spcheckinallsub_subscribes_current_session_when_missing() -> None:
     plugin = _plugin_instance()
     plugin.scheduler.is_subscribed.return_value = False
@@ -125,7 +186,10 @@ async def test_spcheckinallsub_subscribes_current_session_when_missing() -> None
         params={"mode": "all"},
     )
     plugin.scheduler.unsubscribe.assert_not_called()
-    assert result == ["已订阅本会话的全部账号签到结果推送。"]
+    assert result == [
+        "已订阅本会话的签到汇报（全部账号）。"
+        "本命令不会立即执行签到，后续将按自动签到时间推送结果。"
+    ]
 
 
 @pytest.mark.asyncio
@@ -142,7 +206,7 @@ async def test_spcheckinallsub_unsubscribes_current_session_when_present() -> No
         {"mode": "all"},
     )
     plugin.scheduler.subscribe.assert_not_called()
-    assert result == ["已取消本会话的全部账号签到结果推送。"]
+    assert result == ["已取消本会话的签到汇报订阅（全部账号）。"]
 
 
 def test_spcheckinallsub_registers_admin_command_and_alias() -> None:
