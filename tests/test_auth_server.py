@@ -19,7 +19,7 @@ from src.southplus.api import (
 )
 from src.core.datamodels import AuthServerConfig, CredentialSession
 from src.utils import season_name
-from src.web.auth_server import CredentialFormServer, _seasonal_logo
+from src.web.auth_server import CredentialFormServer, LoginState, _seasonal_logo
 from tests.conftest import MockSouthPlusState
 
 
@@ -93,6 +93,162 @@ def test_form_page_lists_token_and_captcha(mock_southplus: MockSouthPlusState) -
         # 验证 body 上有季节 class
         expected_season = season_name()
         assert f'class="season-{expected_season}"' in html
+    finally:
+        server.shutdown()
+
+
+def test_login_session_reuses_unexpired_token_for_same_platform_user(
+    mock_southplus: MockSouthPlusState,
+) -> None:
+    server = _make_server(mock_southplus)
+    try:
+        first = server.get_or_create_session(
+            user_key="u1", unified_msg_origin="group-1", platform="qq"
+        )
+        second = server.get_or_create_session(
+            user_key="u1", unified_msg_origin="group-2", platform="qq"
+        )
+
+        assert first.created is True
+        assert second.created is False
+        assert second.session.token == first.session.token
+        assert second.session.expires_at == first.session.expires_at
+        assert second.session.unified_msg_origin == "group-2"
+    finally:
+        server.shutdown()
+
+
+def test_login_session_reuses_token_while_submit_is_running(
+    mock_southplus: MockSouthPlusState,
+) -> None:
+    resume_login = threading.Event()
+    mock_southplus.login_resume = resume_login
+    server = _make_server(mock_southplus)
+    results: list[tuple[bool, str]] = []
+    try:
+        issue = server.get_or_create_session(
+            user_key="u1", unified_msg_origin="group-1", platform="qq"
+        )
+
+        def submit_login() -> None:
+            results.append(
+                server.handle_submit(issue.session.token, "alice", "secret123", "1234")
+            )
+
+        thread = threading.Thread(target=submit_login)
+        thread.start()
+        # 测试防挂死：若 mock server 没收到 POST，应快速失败而不是卡住 pytest。
+        assert mock_southplus.login_started.wait(timeout=2)
+
+        second = server.get_or_create_session(
+            user_key="u1", unified_msg_origin="group-2", platform="qq"
+        )
+
+        assert mock_southplus.login_calls == 1
+        assert second.created is False
+        assert second.session.token == issue.session.token
+        assert second.state == LoginState.SUBMITTING
+
+        resume_login.set()
+        # 测试防挂死：提交线程应在解除门闩后结束。
+        thread.join(timeout=2)
+        assert not thread.is_alive()
+        assert results == [(True, "登录成功，Cookie 已保存。可以关闭此页面。")]
+    finally:
+        resume_login.set()
+        server.shutdown()
+
+
+def test_login_session_submitting_reuse_updates_origin_under_entry_lock(
+    mock_southplus: MockSouthPlusState,
+) -> None:
+    class GuardedLock:
+        def __init__(self) -> None:
+            self.held = False
+
+        def __enter__(self):
+            self.held = True
+            return self
+
+        def __exit__(self, _exc_type, _exc, _traceback) -> None:
+            self.held = False
+
+    class GuardedSession:
+        token = "ABC123"
+        user_key = "u1"
+        platform = "qq"
+        expires_at = time.time() + 600
+
+        def __init__(self, lock: GuardedLock) -> None:
+            super().__setattr__("_lock", lock)
+            super().__setattr__("unified_msg_origin", "group-1")
+
+        def __setattr__(self, name: str, value: object) -> None:
+            if (
+                name == "unified_msg_origin"
+                and hasattr(self, "_lock")
+                and not self._lock.held
+            ):
+                raise AssertionError("unified_msg_origin must be updated under lock")
+            super().__setattr__(name, value)
+
+    server = _make_server(mock_southplus)
+    try:
+        issue = server.get_or_create_session(
+            user_key="u1", unified_msg_origin="group-1", platform="qq"
+        )
+        entry = server._entries[issue.session.token]
+        lock = GuardedLock()
+        entry.lock = lock
+        entry.session = GuardedSession(lock)
+        entry.state = LoginState.SUBMITTING
+
+        second = server.get_or_create_session(
+            user_key="u1", unified_msg_origin="group-2", platform="qq"
+        )
+
+        assert second.created is False
+        assert second.state == LoginState.SUBMITTING
+        assert second.session.unified_msg_origin == "group-2"
+    finally:
+        server.shutdown()
+
+
+def test_login_session_get_or_create_evicts_expired_session(
+    mock_southplus: MockSouthPlusState,
+) -> None:
+    server = _make_server(mock_southplus, ttl=1)
+    try:
+        first = server.get_or_create_session(
+            user_key="u1", unified_msg_origin="group-1", platform="qq"
+        )
+        time.sleep(1.2)
+
+        second = server.get_or_create_session(
+            user_key="u1", unified_msg_origin="group-2", platform="qq"
+        )
+
+        assert second.created is True
+        assert second.session.token != first.session.token
+        assert server.expire_session(first.session.token) is None
+    finally:
+        server.shutdown()
+
+
+def test_login_session_is_scoped_by_platform(
+    mock_southplus: MockSouthPlusState,
+) -> None:
+    server = _make_server(mock_southplus)
+    try:
+        qq = server.get_or_create_session(
+            user_key="u1", unified_msg_origin="qq-group", platform="qq"
+        )
+        telegram = server.get_or_create_session(
+            user_key="u1", unified_msg_origin="tg-group", platform="telegram"
+        )
+
+        assert qq.session.token != telegram.session.token
+        assert telegram.created is True
     finally:
         server.shutdown()
 

@@ -97,6 +97,13 @@ class _LoginEntry:
     error: str = ""
 
 
+@dataclass(slots=True)
+class CredentialSessionIssue:
+    session: CredentialSession
+    created: bool
+    state: LoginState
+
+
 class CredentialFormServer:
     def __init__(
         self,
@@ -158,19 +165,83 @@ class CredentialFormServer:
     ) -> CredentialSession:
         self.ensure_started()
         with self._lock:
-            token = generate_token()
-            while token in self._entries:
-                token = generate_token()
-            session = CredentialSession(
-                token=token,
+            entry = self._create_entry_unlocked(
                 user_key=user_key,
                 unified_msg_origin=unified_msg_origin,
                 platform=platform,
-                expires_at=expires_at_after(self.config.token_ttl_seconds),
             )
-            entry = _LoginEntry(session=session)
-            self._entries[token] = entry
-        return session
+        return entry.session
+
+    def get_or_create_session(
+        self,
+        *,
+        user_key: str,
+        unified_msg_origin: str,
+        platform: str = "",
+    ) -> CredentialSessionIssue:
+        self.ensure_started()
+        expired_entries: list[_LoginEntry] = []
+        with self._lock:
+            now = time.time()
+            for token, entry in list(self._entries.items()):
+                if entry.session.expires_at > now:
+                    continue
+                self._entries.pop(token, None)
+                expired_entries.append(entry)
+
+            for entry in self._entries.values():
+                session = entry.session
+                if session.user_key != user_key or session.platform != platform:
+                    continue
+                with entry.lock:
+                    if entry.state in (LoginState.AWAITING, LoginState.SUBMITTING):
+                        session.unified_msg_origin = unified_msg_origin
+                        issue = CredentialSessionIssue(
+                            session=session,
+                            created=False,
+                            state=entry.state,
+                        )
+                        break
+            else:
+                entry = self._create_entry_unlocked(
+                    user_key=user_key,
+                    unified_msg_origin=unified_msg_origin,
+                    platform=platform,
+                )
+                issue = CredentialSessionIssue(
+                    session=entry.session,
+                    created=True,
+                    state=entry.state,
+                )
+
+        for entry in expired_entries:
+            with entry.lock:
+                if entry.state == LoginState.AWAITING:
+                    entry.state = LoginState.EXPIRED
+                self._close_entry(entry)
+        return issue
+
+    def _create_entry_unlocked(
+        self,
+        *,
+        user_key: str,
+        unified_msg_origin: str,
+        platform: str,
+    ) -> _LoginEntry:
+        # 调用方必须已持有 self._lock，确保 token 查重与写入 entries 原子完成。
+        token = generate_token()
+        while token in self._entries:
+            token = generate_token()
+        session = CredentialSession(
+            token=token,
+            user_key=user_key,
+            unified_msg_origin=unified_msg_origin,
+            platform=platform,
+            expires_at=expires_at_after(self.config.token_ttl_seconds),
+        )
+        entry = _LoginEntry(session=session)
+        self._entries[token] = entry
+        return entry
 
     def build_url(self, token: str) -> str:
         base = (self.config.base_url or "").rstrip("/")
@@ -254,17 +325,31 @@ class CredentialFormServer:
             request = LoginRequest(
                 username=username, password=password, captcha=captcha
             )
-            try:
-                result = attempt.submit(request)
-            except SouthPlusLoginError as exc:
-                entry.state = LoginState.AWAITING
-                entry.error = str(exc)
-                return False, str(exc)
-            except Exception as exc:  # noqa: BLE001
-                entry.state = LoginState.AWAITING
-                entry.error = f"南+ 登录请求异常：{exc}"
-                plugin_logger.exception("南+ 登录请求异常")
-                return False, entry.error
+        # 提交请求可能较慢，不能在网络 IO 期间持有 entry.lock；否则 /splogin
+        # 无法复用并报告 SUBMITTING 状态。
+        try:
+            result = attempt.submit(request)
+        except SouthPlusLoginError as exc:
+            message = str(exc)
+            with entry.lock:
+                if entry.state == LoginState.SUBMITTING:
+                    entry.state = LoginState.AWAITING
+                    entry.error = message
+            return False, message
+        except Exception as exc:  # noqa: BLE001
+            message = f"南+ 登录请求异常：{exc}"
+            with entry.lock:
+                if entry.state == LoginState.SUBMITTING:
+                    entry.state = LoginState.AWAITING
+                    entry.error = message
+            plugin_logger.exception("南+ 登录请求异常")
+            return False, message
+        with self._lock:
+            active = self._entries.get(token) is entry
+        with entry.lock:
+            if not active or entry.state != LoginState.SUBMITTING:
+                self._close_entry(entry)
+                return False, "登录链接已取消或过期，请重新发起 /splogin。"
             entry.state = LoginState.DONE
         try:
             self.on_login_success(entry.session, request, result)

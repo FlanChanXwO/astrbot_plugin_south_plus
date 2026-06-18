@@ -153,6 +153,8 @@ class MockSouthPlusState:
     last_login_payload: dict[str, str] = field(default_factory=dict)
     captcha_calls: int = 0
     login_calls: int = 0
+    login_started: threading.Event = field(default_factory=threading.Event)
+    login_resume: threading.Event | None = None
     captcha_bytes: bytes = _MIN_PNG
 
 
@@ -223,6 +225,9 @@ def _make_handler(state: MockSouthPlusState) -> type[BaseHTTPRequestHandler]:
             path = self.path.split("?", 1)[0]
             if path == "/login.php":
                 state.login_calls += 1
+                state.login_started.set()
+                if state.login_resume is not None:
+                    state.login_resume.wait()
                 length = int(self.headers.get("Content-Length", "0") or "0")
                 raw = self.rfile.read(length).decode("utf-8")
                 form = {

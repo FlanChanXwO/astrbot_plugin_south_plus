@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -372,8 +373,8 @@ class TestRunAllCheckins:
 
         cstore.get_genuine_status.side_effect = cached_status
         scheduler = _make_scheduler(checkin_store=cstore)
-        cstore.is_already_done.side_effect = lambda *, task_key, **_: task_key == (
-            "sp.checkin.daily"
+        cstore.is_already_done.side_effect = lambda *, task_key, **_: (
+            task_key == ("sp.checkin.daily")
         )
         scheduler._checkin_service.checkin_weekly.return_value = CheckinTaskResult(
             status=CheckinStatus.SUCCESS,
@@ -403,7 +404,112 @@ class TestRunAllCheckins:
 
 class TestSessionExclusion:
     @pytest.mark.asyncio
-    async def test_all_mode_skips_excluded_uid_for_current_session(self) -> None:
+    async def test_all_mode_uses_session_subscription_uid_union(self) -> None:
+        users = [
+            _make_user(sp_uid="uid-1", account="u1"),
+            _make_user(sp_uid="uid-2", account="u2"),
+            _make_user(sp_uid="uid-3", account="u3"),
+        ]
+        ustore = MagicMock()
+        ustore.list_all.return_value = users
+        sstore = MagicMock()
+        sstore.list_by_umo.return_value = [
+            _make_schedule(umo="global-umo", task_key="sp.checkin.all")
+        ]
+        sstore.list_all_enabled.return_value = [
+            _make_schedule(
+                umo="session-a",
+                task_key="sp.checkin.session",
+                params_json='{"mode":"session","account":"u1"}',
+            ),
+            _make_schedule(
+                umo="session-b",
+                task_key="sp.checkin.session",
+                params_json='{"mode":"session","account":"u2"}',
+            ),
+            _make_schedule(umo="global-umo", task_key="sp.checkin.all"),
+        ]
+        estore = MagicMock()
+        estore.list_uids.return_value = set()
+        scheduler = _make_scheduler(
+            user_store=ustore,
+            schedule_store=sstore,
+            exclusion_store=estore,
+        )
+
+        with (
+            patch.object(
+                scheduler, "_checkin_user", new_callable=AsyncMock
+            ) as mock_checkin,
+            patch.object(
+                scheduler, "_push_report", new_callable=AsyncMock
+            ) as mock_push,
+        ):
+            mock_checkin.side_effect = lambda user, _semaphore: _make_per_user_result(
+                sp_uid=user.sp_uid,
+                account=user.account,
+                daily_status=CheckinStatus.SUCCESS.value,
+                weekly_status=CheckinStatus.SUCCESS.value,
+            )
+            await scheduler._tick_for_key("global-umo", "sp.checkin.all")
+
+        assert [call.args[0].sp_uid for call in mock_checkin.await_args_list] == [
+            "uid-1",
+            "uid-2",
+        ]
+        mock_push.assert_awaited_once()
+        assert mock_push.await_args.args[0] == "global-umo"
+        assert mock_push.await_args.args[1] == "sp.checkin.all"
+
+    @pytest.mark.asyncio
+    async def test_all_mode_deduplicates_same_uid_from_multiple_sessions(
+        self,
+    ) -> None:
+        user = _make_user(sp_uid="uid-1", account="u1")
+        ustore = MagicMock()
+        ustore.list_all.return_value = [user]
+        sstore = MagicMock()
+        sstore.list_by_umo.return_value = [
+            _make_schedule(umo="global-umo", task_key="sp.checkin.all")
+        ]
+        sstore.list_all_enabled.return_value = [
+            _make_schedule(
+                umo="session-a",
+                task_key="sp.checkin.session",
+                params_json='{"mode":"session","account":"u1"}',
+            ),
+            _make_schedule(
+                umo="session-b",
+                task_key="sp.checkin.session",
+                params_json='{"mode":"session","account":"u1"}',
+            ),
+        ]
+        estore = MagicMock()
+        estore.list_uids.return_value = set()
+        scheduler = _make_scheduler(
+            user_store=ustore,
+            schedule_store=sstore,
+            exclusion_store=estore,
+        )
+
+        with (
+            patch.object(
+                scheduler, "_checkin_user", new_callable=AsyncMock
+            ) as mock_checkin,
+            patch.object(
+                scheduler, "_push_report", new_callable=AsyncMock
+            ) as mock_push,
+        ):
+            mock_checkin.return_value = _make_per_user_result(sp_uid="uid-1")
+            await scheduler._tick_for_key("global-umo", "sp.checkin.all")
+
+        assert [call.args[0].sp_uid for call in mock_checkin.await_args_list] == [
+            "uid-1"
+        ]
+        mock_push.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_all_mode_caches_exclusions_per_session_umo(self) -> None:
         users = [
             _make_user(sp_uid="uid-1", account="u1"),
             _make_user(sp_uid="uid-2", account="u2"),
@@ -412,6 +518,110 @@ class TestSessionExclusion:
         ustore.list_all.return_value = users
         sstore = MagicMock()
         sstore.list_by_umo.return_value = [
+            _make_schedule(umo="global-umo", task_key="sp.checkin.all")
+        ]
+        sstore.list_all_enabled.return_value = [
+            _make_schedule(
+                umo="session-a",
+                task_key="sp.checkin.session",
+                params_json='{"mode":"session","account":"u1"}',
+            ),
+            _make_schedule(
+                umo="session-a",
+                task_key="sp.checkin.session",
+                params_json='{"mode":"session","account":"u2"}',
+            ),
+        ]
+        estore = MagicMock()
+        estore.list_uids.return_value = set()
+        scheduler = _make_scheduler(
+            user_store=ustore,
+            schedule_store=sstore,
+            exclusion_store=estore,
+        )
+
+        with (
+            patch.object(
+                scheduler, "_checkin_user", new_callable=AsyncMock
+            ) as mock_checkin,
+            patch.object(scheduler, "_push_report", new_callable=AsyncMock),
+        ):
+            mock_checkin.side_effect = lambda user, _semaphore: _make_per_user_result(
+                sp_uid=user.sp_uid,
+                account=user.account,
+                daily_status=CheckinStatus.SUCCESS.value,
+                weekly_status=CheckinStatus.SUCCESS.value,
+            )
+            await scheduler._tick_for_key("global-umo", "sp.checkin.all")
+
+        assert [call.args[0].sp_uid for call in mock_checkin.await_args_list] == [
+            "uid-1",
+            "uid-2",
+        ]
+        estore.list_uids.assert_called_once_with("session-a")
+
+    @pytest.mark.asyncio
+    async def test_all_mode_includes_uid_when_any_session_participates(self) -> None:
+        user = _make_user(sp_uid="uid-1", account="u1")
+        ustore = MagicMock()
+        ustore.list_all.return_value = [user]
+        sstore = MagicMock()
+        sstore.list_by_umo.return_value = [
+            _make_schedule(umo="global-umo", task_key="sp.checkin.all")
+        ]
+        sstore.list_all_enabled.return_value = [
+            _make_schedule(
+                umo="session-a",
+                task_key="sp.checkin.session",
+                params_json='{"mode":"session","account":"u1"}',
+            ),
+            _make_schedule(
+                umo="session-b",
+                task_key="sp.checkin.session",
+                params_json='{"mode":"session","account":"u1"}',
+            ),
+        ]
+        estore = MagicMock()
+        estore.list_uids.side_effect = lambda umo: (
+            {"uid-1"} if umo == "session-a" else set()
+        )
+        scheduler = _make_scheduler(
+            user_store=ustore,
+            schedule_store=sstore,
+            exclusion_store=estore,
+        )
+
+        with (
+            patch.object(
+                scheduler, "_checkin_user", new_callable=AsyncMock
+            ) as mock_checkin,
+            patch.object(
+                scheduler, "_push_report", new_callable=AsyncMock
+            ) as mock_push,
+        ):
+            mock_checkin.return_value = _make_per_user_result(sp_uid="uid-1")
+            await scheduler._tick_for_key("global-umo", "sp.checkin.all")
+
+        assert [call.args[0].sp_uid for call in mock_checkin.await_args_list] == [
+            "uid-1"
+        ]
+        mock_push.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_all_mode_falls_back_to_all_enabled_users_without_session_subs(
+        self,
+    ) -> None:
+        users = [
+            _make_user(sp_uid="uid-1", account="u1"),
+            _make_user(sp_uid="uid-2", account="u2"),
+        ]
+        ustore = MagicMock()
+        ustore.list_all.return_value = users
+        sstore = MagicMock()
+        sstore.list_by_umo.return_value = [
+            _make_schedule(umo="umo1", task_key="sp.checkin.all")
+        ]
+        sstore.list_all_enabled.return_value = [
             _make_schedule(umo="umo1", task_key="sp.checkin.all")
         ]
         estore = MagicMock()
@@ -514,6 +724,93 @@ class TestSessionExclusion:
         mock_push.assert_awaited_once()
         assert mock_push.await_args.args[0] == "umo1"
         assert mock_push.await_args.args[1] == "sp.checkin.session"
+
+    @pytest.mark.asyncio
+    async def test_concurrent_all_and_session_ticks_share_same_uid_result(
+        self,
+    ) -> None:
+        user = _make_user(sp_uid="uid-1", account="u1")
+        ustore = MagicMock()
+        ustore.list_all.return_value = [user]
+        sstore = MagicMock()
+
+        def list_by_umo(umo: str) -> list[ScheduleRow]:
+            if umo == "global-umo":
+                return [_make_schedule(umo=umo, task_key="sp.checkin.all")]
+            if umo == "session-umo":
+                return [
+                    _make_schedule(
+                        umo=umo,
+                        task_key="sp.checkin.session",
+                        params_json='{"mode":"session","account":"u1"}',
+                    )
+                ]
+            return []
+
+        sstore.list_by_umo.side_effect = list_by_umo
+        sstore.list_all_enabled.return_value = [
+            _make_schedule(umo="global-umo", task_key="sp.checkin.all"),
+            _make_schedule(
+                umo="session-umo",
+                task_key="sp.checkin.session",
+                params_json='{"mode":"session","account":"u1"}',
+            ),
+        ]
+        estore = MagicMock()
+        estore.list_uids.return_value = set()
+        scheduler = _make_scheduler(
+            user_store=ustore,
+            schedule_store=sstore,
+            exclusion_store=estore,
+        )
+        scheduler._semaphore = asyncio.Semaphore(2)
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def do_checkin_once(user_arg: UserRow) -> _PerUserResult:
+            started.set()
+            await release.wait()
+            return _PerUserResult(
+                user=user_arg,
+                result=TaskResult(status=CheckinStatus.SUCCESS.value, message="OK"),
+                skipped=False,
+                daily_status=CheckinStatus.SUCCESS.value,
+                weekly_status=CheckinStatus.SUCCESS.value,
+            )
+
+        with (
+            patch.object(
+                scheduler, "_do_checkin_both", new_callable=AsyncMock
+            ) as mock_do,
+            patch.object(
+                scheduler, "_push_report", new_callable=AsyncMock
+            ) as mock_push,
+        ):
+            mock_do.side_effect = do_checkin_once
+            all_tick = asyncio.create_task(
+                scheduler._tick_for_key("global-umo", "sp.checkin.all")
+            )
+            session_tick = asyncio.create_task(
+                scheduler._tick_for_key("session-umo", "sp.checkin.session")
+            )
+            try:
+                await asyncio.wait_for(started.wait(), timeout=2)
+                await asyncio.sleep(0)
+                release.set()
+                await asyncio.gather(all_tick, session_tick)
+            finally:
+                all_tick.cancel()
+                session_tick.cancel()
+
+        assert mock_do.await_count == 1
+        assert {call.args[0] for call in mock_push.await_args_list} == {
+            "global-umo",
+            "session-umo",
+        }
+        assert {call.args[1] for call in mock_push.await_args_list} == {
+            "sp.checkin.all",
+            "sp.checkin.session",
+        }
 
     def test_refresh_checkin_jobs_rebuilds_both_checkin_jobs(self) -> None:
         scheduler = _make_scheduler()

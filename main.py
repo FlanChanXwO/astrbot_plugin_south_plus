@@ -16,7 +16,7 @@ from astrbot.api.message_components import Image as CompImage
 from astrbot.api.message_components import Node, Plain
 from astrbot.api.star import Context, Star
 
-from .src.web.auth_server import CredentialFormServer
+from .src.web.auth_server import CredentialFormServer, LoginState
 from .src.core.checkin_scheduler import CheckinScheduler
 from .src.core.config_manager import PluginConfigManager
 from .src.core.db import (
@@ -144,17 +144,22 @@ class SouthPlusPlugin(Star):
     @filter.command("splogin", alias={"sp登陆"})
     async def sp_login(self, event: AstrMessageEvent):
         """生成一次性网页登录链接。每次登录成功会自动新增/刷新一条 UID 绑定。"""
-        session = self.form_server.create_session(
+        issue = self.form_server.get_or_create_session(
             user_key=event.get_sender_id(),
             unified_msg_origin=event.unified_msg_origin,
             platform=get_event_platform(event),
         )
-        self._expiry_tasks[session.token] = asyncio.create_task(
-            self._expire_login_later(session)
-        )
+        session = issue.session
+        if issue.state == LoginState.SUBMITTING:
+            yield event.plain_result("登录请求正在处理，请等待结果。")
+            return
+        if issue.created:
+            self._expiry_tasks[session.token] = asyncio.create_task(
+                self._expire_login_later(session)
+            )
         url = self.form_server.build_url(session.token)
-        ttl = self.config_snapshot.auth_server.token_ttl_seconds
-        minutes = max(1, ttl // 60)
+        ttl = max(1, int(session.expires_at - time.time()))
+        minutes = max(1, (ttl + 59) // 60)
 
         strategy = self.config_snapshot.login_link_strategy
         use_docs = self.config_snapshot.use_docs_link_wrapper

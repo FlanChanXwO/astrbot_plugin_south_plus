@@ -110,9 +110,9 @@ data/plugin_data/astrbot_plugin_south_plus/southplus.db
  |             |                            |                              |
  |  /splogin   |                            |                              |
  |------------>|                            |                              |
- |             | create_session(token)      |                              |
+ |             | get_or_create_session      |                              |
  |             |--------------------------->|                              |
- |             | 登录链接 URL                |                              |
+ |             | 新建或复用登录链接 URL       |                              |
  |             |<---------------------------|                              |
  |  访问 URL   |                            |                              |
  |-------------------------------------------->|                          |
