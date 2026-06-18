@@ -193,14 +193,6 @@ class CredentialFormServer:
                 session = entry.session
                 if session.user_key != user_key or session.platform != platform:
                     continue
-                if entry.state == LoginState.SUBMITTING:
-                    session.unified_msg_origin = unified_msg_origin
-                    issue = CredentialSessionIssue(
-                        session=session,
-                        created=False,
-                        state=LoginState.SUBMITTING,
-                    )
-                    break
                 with entry.lock:
                     if entry.state in (LoginState.AWAITING, LoginState.SUBMITTING):
                         session.unified_msg_origin = unified_msg_origin
@@ -333,17 +325,31 @@ class CredentialFormServer:
             request = LoginRequest(
                 username=username, password=password, captcha=captcha
             )
-            try:
-                result = attempt.submit(request)
-            except SouthPlusLoginError as exc:
-                entry.state = LoginState.AWAITING
-                entry.error = str(exc)
-                return False, str(exc)
-            except Exception as exc:  # noqa: BLE001
-                entry.state = LoginState.AWAITING
-                entry.error = f"南+ 登录请求异常：{exc}"
-                plugin_logger.exception("南+ 登录请求异常")
-                return False, entry.error
+        # 提交请求可能较慢，不能在网络 IO 期间持有 entry.lock；否则 /splogin
+        # 无法复用并报告 SUBMITTING 状态。
+        try:
+            result = attempt.submit(request)
+        except SouthPlusLoginError as exc:
+            message = str(exc)
+            with entry.lock:
+                if entry.state == LoginState.SUBMITTING:
+                    entry.state = LoginState.AWAITING
+                    entry.error = message
+            return False, message
+        except Exception as exc:  # noqa: BLE001
+            message = f"南+ 登录请求异常：{exc}"
+            with entry.lock:
+                if entry.state == LoginState.SUBMITTING:
+                    entry.state = LoginState.AWAITING
+                    entry.error = message
+            plugin_logger.exception("南+ 登录请求异常")
+            return False, message
+        with self._lock:
+            active = self._entries.get(token) is entry
+        with entry.lock:
+            if not active or entry.state != LoginState.SUBMITTING:
+                self._close_entry(entry)
+                return False, "登录链接已取消或过期，请重新发起 /splogin。"
             entry.state = LoginState.DONE
         try:
             self.on_login_success(entry.session, request, result)

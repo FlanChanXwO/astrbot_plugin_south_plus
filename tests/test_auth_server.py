@@ -159,6 +159,61 @@ def test_login_session_reuses_token_while_submit_is_running(
         server.shutdown()
 
 
+def test_login_session_submitting_reuse_updates_origin_under_entry_lock(
+    mock_southplus: MockSouthPlusState,
+) -> None:
+    class GuardedLock:
+        def __init__(self) -> None:
+            self.held = False
+
+        def __enter__(self):
+            self.held = True
+            return self
+
+        def __exit__(self, _exc_type, _exc, _traceback) -> None:
+            self.held = False
+
+    class GuardedSession:
+        token = "ABC123"
+        user_key = "u1"
+        platform = "qq"
+        expires_at = time.time() + 600
+
+        def __init__(self, lock: GuardedLock) -> None:
+            super().__setattr__("_lock", lock)
+            super().__setattr__("unified_msg_origin", "group-1")
+
+        def __setattr__(self, name: str, value: object) -> None:
+            if (
+                name == "unified_msg_origin"
+                and hasattr(self, "_lock")
+                and not self._lock.held
+            ):
+                raise AssertionError("unified_msg_origin must be updated under lock")
+            super().__setattr__(name, value)
+
+    server = _make_server(mock_southplus)
+    try:
+        issue = server.get_or_create_session(
+            user_key="u1", unified_msg_origin="group-1", platform="qq"
+        )
+        entry = server._entries[issue.session.token]
+        lock = GuardedLock()
+        entry.lock = lock
+        entry.session = GuardedSession(lock)
+        entry.state = LoginState.SUBMITTING
+
+        second = server.get_or_create_session(
+            user_key="u1", unified_msg_origin="group-2", platform="qq"
+        )
+
+        assert second.created is False
+        assert second.state == LoginState.SUBMITTING
+        assert second.session.unified_msg_origin == "group-2"
+    finally:
+        server.shutdown()
+
+
 def test_login_session_get_or_create_evicts_expired_session(
     mock_southplus: MockSouthPlusState,
 ) -> None:

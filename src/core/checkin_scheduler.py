@@ -572,17 +572,22 @@ class CheckinScheduler:
         """全局订阅使用所有会话订阅参与账号的 UID 并集；无会话订阅时回退全库。"""
         seen_uids: set[str] = set()
         users: list[UserRow] = []
+        excluded_by_umo: dict[str, set[str]] = {}
+
+        def excluded_uids_for(umo: str) -> set[str]:
+            if not self._exclusion_store:
+                return set()
+            if umo not in excluded_by_umo:
+                excluded_by_umo[umo] = self._exclusion_store.list_uids(umo)
+            return excluded_by_umo[umo]
+
         for row in self._schedule_store.list_all_enabled():
             if row.task_key != CHECKIN_TASK_KEY_SESSION:
                 continue
             params = json.loads(row.params_json) if row.params_json else {}
             if params.get("mode", "session") != "session":
                 continue
-            excluded_uids = (
-                self._exclusion_store.list_uids(row.umo)
-                if self._exclusion_store
-                else set()
-            )
+            excluded_uids = excluded_uids_for(row.umo)
             account = params.get("account", "")
             active = self._get_active_for_account(account)
             if active:
@@ -591,11 +596,7 @@ class CheckinScheduler:
         if users:
             return users
 
-        excluded_uids = (
-            self._exclusion_store.list_uids(fallback_umo)
-            if self._exclusion_store
-            else set()
-        )
+        excluded_uids = excluded_uids_for(fallback_umo)
         for user in self._user_store.list_all():
             _append_checkin_user(user, users, seen_uids, excluded_uids)
         return users
