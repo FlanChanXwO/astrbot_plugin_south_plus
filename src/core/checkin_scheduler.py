@@ -72,6 +72,10 @@ class CheckinScheduler:
         self._send_message = send_message
         self._scheduler: AsyncIOScheduler | None = None
         self._semaphore: asyncio.Semaphore | None = None
+        self._checkin_inflight: dict[
+            tuple[str, str, str], asyncio.Task[_PerUserResult | None]
+        ] = {}
+        self._checkin_inflight_lock = asyncio.Lock()
 
     # ------------------------------------------------------------------
     # 生命周期
@@ -259,43 +263,7 @@ class CheckinScheduler:
         if not matching:
             return
 
-        # 从订阅中收集去重的用户列表
-        seen_uids: set[str] = set()
-        users: list[UserRow] = []
-        has_all_mode = False
-        excluded_uids = (
-            self._exclusion_store.list_uids(umo)
-            if is_checkin and self._exclusion_store
-            else set()
-        )
-
-        for row in matching:
-            params = json.loads(row.params_json) if row.params_json else {}
-            mode = params.get("mode", "session")
-            if mode == "all":
-                has_all_mode = True
-            else:
-                account = params.get("account", "")
-                if account:
-                    active = self._get_active_for_account(account)
-                    if (
-                        active
-                        and active.auto_checkin
-                        and active.sp_uid not in excluded_uids
-                        and active.sp_uid not in seen_uids
-                    ):
-                        seen_uids.add(active.sp_uid)
-                        users.append(active)
-
-        if has_all_mode:
-            for u in self._user_store.list_all():
-                if (
-                    u.sp_uid not in seen_uids
-                    and u.sp_uid not in excluded_uids
-                    and u.auto_checkin
-                ):
-                    seen_uids.add(u.sp_uid)
-                    users.append(u)
+        users = self._collect_tick_users(umo, task_key, matching, is_checkin)
 
         if not users:
             plugin_logger.debug(f"聚合 tick：无用户，跳过 umo={umo}")
@@ -390,6 +358,28 @@ class CheckinScheduler:
         semaphore: asyncio.Semaphore,
     ) -> _PerUserResult | None:
         """全量签到入口（/spallcheckin）：同时跑日签+周签。"""
+        key = (user.sp_uid, current_local_date(), current_iso_week())
+        async with self._checkin_inflight_lock:
+            task = self._checkin_inflight.get(key)
+            if task is None:
+                task = asyncio.create_task(self._checkin_user_once(user, semaphore))
+                self._checkin_inflight[key] = task
+                owner = True
+            else:
+                owner = False
+        try:
+            return await task
+        finally:
+            if owner:
+                async with self._checkin_inflight_lock:
+                    if self._checkin_inflight.get(key) is task:
+                        self._checkin_inflight.pop(key, None)
+
+    async def _checkin_user_once(
+        self,
+        user: UserRow,
+        semaphore: asyncio.Semaphore,
+    ) -> _PerUserResult | None:
         async with semaphore:
             return await self._do_checkin_both(user)
 
@@ -544,6 +534,72 @@ class CheckinScheduler:
                 return u
         return None
 
+    def _collect_tick_users(
+        self,
+        umo: str,
+        task_key: str,
+        matching: list[Any],
+        is_checkin: bool,
+    ) -> list[UserRow]:
+        """按当前 tick 的订阅语义收集参与账号，结果按 UID 去重。"""
+        if is_checkin and task_key == CHECKIN_TASK_KEY_ALL:
+            users = self._collect_global_subscription_users(fallback_umo=umo)
+            if users:
+                return users
+
+        seen_uids: set[str] = set()
+        users: list[UserRow] = []
+        excluded_uids = (
+            self._exclusion_store.list_uids(umo)
+            if is_checkin and self._exclusion_store
+            else set()
+        )
+
+        for row in matching:
+            params = json.loads(row.params_json) if row.params_json else {}
+            mode = params.get("mode", "session")
+            if mode == "all":
+                for user in self._user_store.list_all():
+                    _append_checkin_user(user, users, seen_uids, excluded_uids)
+            else:
+                account = params.get("account", "")
+                active = self._get_active_for_account(account)
+                if active:
+                    _append_checkin_user(active, users, seen_uids, excluded_uids)
+        return users
+
+    def _collect_global_subscription_users(self, *, fallback_umo: str) -> list[UserRow]:
+        """全局订阅使用所有会话订阅参与账号的 UID 并集；无会话订阅时回退全库。"""
+        seen_uids: set[str] = set()
+        users: list[UserRow] = []
+        for row in self._schedule_store.list_all_enabled():
+            if row.task_key != CHECKIN_TASK_KEY_SESSION:
+                continue
+            params = json.loads(row.params_json) if row.params_json else {}
+            if params.get("mode", "session") != "session":
+                continue
+            excluded_uids = (
+                self._exclusion_store.list_uids(row.umo)
+                if self._exclusion_store
+                else set()
+            )
+            account = params.get("account", "")
+            active = self._get_active_for_account(account)
+            if active:
+                _append_checkin_user(active, users, seen_uids, excluded_uids)
+
+        if users:
+            return users
+
+        excluded_uids = (
+            self._exclusion_store.list_uids(fallback_umo)
+            if self._exclusion_store
+            else set()
+        )
+        for user in self._user_store.list_all():
+            _append_checkin_user(user, users, seen_uids, excluded_uids)
+        return users
+
 
 # ------------------------------------------------------------------
 # helper
@@ -559,6 +615,22 @@ def _job_id_for_key(umo: str, task_key: str) -> str:
 
 def _is_failed(result: _PerUserResult) -> bool:
     return result.result.status == CheckinStatus.FAILED.value
+
+
+def _append_checkin_user(
+    user: UserRow,
+    users: list[UserRow],
+    seen_uids: set[str],
+    excluded_uids: set[str],
+) -> None:
+    if (
+        not user.auto_checkin
+        or user.sp_uid in excluded_uids
+        or user.sp_uid in seen_uids
+    ):
+        return
+    seen_uids.add(user.sp_uid)
+    users.append(user)
 
 
 @dataclass(slots=True)

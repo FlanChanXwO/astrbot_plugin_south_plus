@@ -9,7 +9,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.core.datamodels import UserRow
+from src.core.datamodels import CredentialSession, UserRow
+from src.web.auth_server import CredentialSessionIssue, LoginState
 
 
 def _load_plugin_module():
@@ -57,6 +58,28 @@ def _plugin_instance():
     return plugin
 
 
+def _login_plugin_instance(issue: CredentialSessionIssue):
+    SouthPlusPlugin, _ = _load_plugin_class()
+    plugin = object.__new__(SouthPlusPlugin)
+    plugin.config_snapshot = types.SimpleNamespace(
+        auth_server=types.SimpleNamespace(token_ttl_seconds=600),
+        login_link_strategy="text",
+        use_docs_link_wrapper=False,
+        use_forward_node=False,
+    )
+    plugin.form_server = MagicMock()
+    plugin.form_server.get_or_create_session.return_value = issue
+    plugin.form_server.create_session.return_value = issue.session
+    plugin.form_server.build_url.return_value = "http://login.local/login/ABC123"
+    plugin._expiry_tasks = {}
+
+    async def expire_later(_session: CredentialSession) -> None:
+        return None
+
+    plugin._expire_login_later = expire_later
+    return plugin
+
+
 def _user(auto_checkin: bool) -> UserRow:
     return UserRow(
         sp_uid="uid-1",
@@ -68,6 +91,97 @@ def _user(auto_checkin: bool) -> UserRow:
         updated_at="2026-06-06T00:00:00",
         auto_checkin=auto_checkin,
     )
+
+
+@pytest.mark.asyncio
+async def test_splogin_uses_reusable_session_api_and_schedules_new_expiry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_plugin_module()
+    monkeypatch.setattr(module.time, "time", lambda: 1000.0)
+    session = CredentialSession(
+        token="ABC123",
+        user_key="account-1",
+        unified_msg_origin="aiocqhttp:group:100",
+        platform="aiocqhttp",
+        expires_at=1600.0,
+    )
+    issue = CredentialSessionIssue(
+        session=session, created=True, state=LoginState.AWAITING
+    )
+    plugin = _login_plugin_instance(issue)
+    event = _Event()
+    event.message_str = "/splogin"
+
+    result = await _collect(plugin.sp_login(event))
+
+    plugin.form_server.get_or_create_session.assert_called_once_with(
+        user_key="account-1",
+        unified_msg_origin="aiocqhttp:group:100",
+        platform="aiocqhttp",
+    )
+    assert plugin.form_server.create_session.call_count == 0
+    assert list(plugin._expiry_tasks) == ["ABC123"]
+    assert result == [
+        "请在 10 分钟内打开并提交登录表单：\n"
+        "http://login.local/login/ABC123\n"
+        "页面会代理拉取站点验证码，请手动填写。"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_splogin_reuses_existing_session_without_new_expiry_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_plugin_module()
+    monkeypatch.setattr(module.time, "time", lambda: 1000.0)
+    session = CredentialSession(
+        token="ABC123",
+        user_key="account-1",
+        unified_msg_origin="aiocqhttp:group:100",
+        platform="aiocqhttp",
+        expires_at=1300.0,
+    )
+    issue = CredentialSessionIssue(
+        session=session, created=False, state=LoginState.AWAITING
+    )
+    plugin = _login_plugin_instance(issue)
+    existing_task = MagicMock()
+    plugin._expiry_tasks = {"ABC123": existing_task}
+    event = _Event()
+    event.message_str = "/splogin"
+
+    result = await _collect(plugin.sp_login(event))
+
+    assert plugin._expiry_tasks == {"ABC123": existing_task}
+    assert result == [
+        "请在 5 分钟内打开并提交登录表单：\n"
+        "http://login.local/login/ABC123\n"
+        "页面会代理拉取站点验证码，请手动填写。"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_splogin_reports_running_submit_without_link() -> None:
+    session = CredentialSession(
+        token="ABC123",
+        user_key="account-1",
+        unified_msg_origin="aiocqhttp:group:100",
+        platform="aiocqhttp",
+        expires_at=1600.0,
+    )
+    issue = CredentialSessionIssue(
+        session=session, created=False, state=LoginState.SUBMITTING
+    )
+    plugin = _login_plugin_instance(issue)
+    event = _Event()
+    event.message_str = "/splogin"
+
+    result = await _collect(plugin.sp_login(event))
+
+    plugin.form_server.build_url.assert_not_called()
+    assert plugin._expiry_tasks == {}
+    assert result == ["登录请求正在处理，请等待结果。"]
 
 
 @pytest.mark.parametrize(

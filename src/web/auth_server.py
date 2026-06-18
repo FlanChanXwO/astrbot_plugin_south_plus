@@ -97,6 +97,13 @@ class _LoginEntry:
     error: str = ""
 
 
+@dataclass(slots=True)
+class CredentialSessionIssue:
+    session: CredentialSession
+    created: bool
+    state: LoginState
+
+
 class CredentialFormServer:
     def __init__(
         self,
@@ -158,19 +165,91 @@ class CredentialFormServer:
     ) -> CredentialSession:
         self.ensure_started()
         with self._lock:
-            token = generate_token()
-            while token in self._entries:
-                token = generate_token()
-            session = CredentialSession(
-                token=token,
+            entry = self._create_entry_unlocked(
                 user_key=user_key,
                 unified_msg_origin=unified_msg_origin,
                 platform=platform,
-                expires_at=expires_at_after(self.config.token_ttl_seconds),
             )
-            entry = _LoginEntry(session=session)
-            self._entries[token] = entry
-        return session
+        return entry.session
+
+    def get_or_create_session(
+        self,
+        *,
+        user_key: str,
+        unified_msg_origin: str,
+        platform: str = "",
+    ) -> CredentialSessionIssue:
+        self.ensure_started()
+        expired_entries: list[_LoginEntry] = []
+        with self._lock:
+            now = time.time()
+            for token, entry in list(self._entries.items()):
+                if entry.session.expires_at > now:
+                    continue
+                self._entries.pop(token, None)
+                expired_entries.append(entry)
+
+            for entry in self._entries.values():
+                session = entry.session
+                if session.user_key != user_key or session.platform != platform:
+                    continue
+                if entry.state == LoginState.SUBMITTING:
+                    session.unified_msg_origin = unified_msg_origin
+                    issue = CredentialSessionIssue(
+                        session=session,
+                        created=False,
+                        state=LoginState.SUBMITTING,
+                    )
+                    break
+                with entry.lock:
+                    if entry.state in (LoginState.AWAITING, LoginState.SUBMITTING):
+                        session.unified_msg_origin = unified_msg_origin
+                        issue = CredentialSessionIssue(
+                            session=session,
+                            created=False,
+                            state=entry.state,
+                        )
+                        break
+            else:
+                entry = self._create_entry_unlocked(
+                    user_key=user_key,
+                    unified_msg_origin=unified_msg_origin,
+                    platform=platform,
+                )
+                issue = CredentialSessionIssue(
+                    session=entry.session,
+                    created=True,
+                    state=entry.state,
+                )
+
+        for entry in expired_entries:
+            with entry.lock:
+                if entry.state == LoginState.AWAITING:
+                    entry.state = LoginState.EXPIRED
+                self._close_entry(entry)
+        return issue
+
+    def _create_entry_unlocked(
+        self,
+        *,
+        user_key: str,
+        unified_msg_origin: str,
+        platform: str,
+    ) -> _LoginEntry:
+        # 调用方必须已持有 self._lock，确保 token 查重与写入 entries 原子完成。
+        token = generate_token()
+        while token in self._entries:
+            token = generate_token()
+        session = CredentialSession(
+            token=token,
+            user_key=user_key,
+            unified_msg_origin=unified_msg_origin,
+            platform=platform,
+            expires_at=expires_at_after(self.config.token_ttl_seconds),
+        )
+        entry = _LoginEntry(session=session)
+        self._entries[token] = entry
+        return entry
 
     def build_url(self, token: str) -> str:
         base = (self.config.base_url or "").rstrip("/")
