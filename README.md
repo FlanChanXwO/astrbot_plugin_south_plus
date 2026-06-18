@@ -2,6 +2,10 @@
 
 <div align="center">
 
+<br/>
+
+<img src="https://count.getloli.com/@astrbot_plugin_south_plus?name=astrbot_plugin_south_plus&theme=rule34&padding=7&offset=0&align=top&scale=1&pixelated=1&darkmode=auto" alt="Moe Counter">
+
 **支持社区签到、账号信息查询与定时签到的 SouthPlus AstrBot 插件**
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
